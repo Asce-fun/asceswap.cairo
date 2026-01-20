@@ -3,7 +3,7 @@ use starknet::{ContractAddress, contract_address_const};
 pub enum RateType {
     #[default]
     Fixed,
-    Variable,
+    Floating,
 }
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
@@ -36,7 +36,7 @@ pub struct MarketParams {
     pub reference_rate_oracle: ContractAddress,
     pub swap_token: ContractAddress,
     pub liquidation_threshold: u16, // bps (e.g., 8500 = 85%)
-    pub swap_terms: u64, // in seconds
+    pub swap_term: u64, // in seconds
     pub fee_spread: u16, // bps 
     pub min_util_fee: u16, // bps
     pub max_util_fee: u16, // bps
@@ -52,7 +52,6 @@ pub struct MarketParams {
 #[derive(Drop, Copy, Serde, Debug, starknet::Store)]
 pub struct Market {
     pub status: MarketStatus,
-    pub paused: bool,
     pub rate_type: RateType,
     pub paired_market_id: u256, // the market id of the paired market (fixed/float)
     pub params: MarketParams,
@@ -117,7 +116,6 @@ pub impl DefaultMarket of Default<Market> {
     fn default() -> Market {
         Market {
             status: MarketStatus::Closed,
-            paused: false,
             rate_type: RateType::Fixed,
             paired_market_id: 0,
             params: Default::default(),
@@ -136,7 +134,7 @@ pub impl DefaultMarketParams of Default<MarketParams> {
             reference_rate_oracle: contract_address_const::<0>(),
             swap_token: contract_address_const::<0>(),
             liquidation_threshold: 0,
-            swap_terms: 0,
+            swap_term: 0,
             fee_spread: 0,
             min_util_fee: 0,
             max_util_fee: 0,
