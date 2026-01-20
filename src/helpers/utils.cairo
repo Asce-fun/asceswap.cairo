@@ -1,4 +1,4 @@
-use crate::helpers::constants::BPS;
+use crate::helpers::constants::Constants;
 use crate::helpers::fixed_point::mul_div_up;
 
 
@@ -98,6 +98,6 @@ pub fn abs_diff(a: u256, b: u256) -> u256 {
 /// tolerance_bps: e.g., 100 = 1% tolerance
 pub fn is_within_tolerance(value: u256, target: u256, tolerance_bps: u256) -> bool {
     let diff = abs_diff(value, target);
-    let max_diff = mul_div_up(target, tolerance_bps, BPS);
+    let max_diff = mul_div_up(target, tolerance_bps, Constants::BPS);
     diff <= max_diff
 }

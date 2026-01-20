@@ -40,18 +40,22 @@ impl SignedValueImpl of SignedValueTrait {
             SignedValue { value: self.value + other.value, is_negative: self.is_negative }
         } else if self.value >= other.value {
             let result = self.value - other.value;
-            SignedValue { value: result, is_negative: if result == 0 {
-                false
-            } else {
-                self.is_negative
-            } }
+            SignedValue {
+                value: result, is_negative: if result == 0 {
+                    false
+                } else {
+                    self.is_negative
+                },
+            }
         } else {
             let result = other.value - self.value;
-            SignedValue { value: result, is_negative: if result == 0 {
-                false
-            } else {
-                other.is_negative
-            } }
+            SignedValue {
+                value: result, is_negative: if result == 0 {
+                    false
+                } else {
+                    other.is_negative
+                },
+            }
         }
     }
 
