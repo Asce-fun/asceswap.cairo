@@ -1,0 +1,36 @@
+pub mod Errors {
+    pub const INVALID_ORACLE: felt252 = 'Invalid oracle address';
+    pub const INVALID_TOKEN: felt252 = 'Invalid token address';
+    pub const INVALID_THRESHOLD: felt252 = 'Threshold must be 50-95%';
+    pub const INVALID_TERM: felt252 = 'Term must be 1-365 days';
+    pub const INVALID_FEE: felt252 = 'Fee exceeds maximum';
+    pub const MARKET_NOT_FOUND: felt252 = 'Market does not exist';
+    pub const MARKET_PAUSED: felt252 = 'Market is paused';
+    pub const MARKET_NOT_ACTIVE: felt252 = 'Market not active';
+    pub const INSUFFICIENT_COLLATERAL: felt252 = 'Insufficient collateral';
+    pub const INSUFFICIENT_LIQUIDITY: felt252 = 'Insufficient liquidity';
+    pub const BELOW_MIN_NOTIONAL: felt252 = 'Below minimum notional';
+    pub const BELOW_MIN_DEPOSIT: felt252 = 'Below minimum deposit';
+    pub const BELOW_MIN_SHARES: felt252 = 'Below minimum shares';
+    pub const EXCEEDS_MAX_UTILIZATION: felt252 = 'Exceeds max utilization';
+    pub const SWAP_NOT_FOUND: felt252 = 'Swap does not exist';
+    pub const SWAP_ALREADY_SETTLED: felt252 = 'Swap already settled';
+    pub const SWAP_NOT_EXPIRED: felt252 = 'Swap not yet expired';
+    pub const SWAP_EXPIRED: felt252 = 'Swap has expired';
+    pub const NOT_SWAP_OWNER: felt252 = 'Not swap owner';
+    pub const POSITION_HEALTHY: felt252 = 'Position is healthy';
+    pub const ORACLE_STALE: felt252 = 'Oracle data is stale';
+    pub const ORACLE_INVALID_PRICE: felt252 = 'Oracle returned invalid price';
+    pub const ORACLE_INVALID_RATE: felt252 = 'Oracle returned invalid rate';
+    pub const ZERO_AMOUNT: felt252 = 'Amount must be positive';
+    pub const INSUFFICIENT_SHARES: felt252 = 'Insufficient LP shares';
+    pub const LOCKED_COLLATERAL: felt252 = 'Collateral is locked';
+    pub const PROTOCOL_PAUSED: felt252 = 'Protocol is paused';
+    pub const UNAUTHORIZED: felt252 = 'Unauthorized';
+    pub const ZERO_SHARES: felt252 = 'Zero shares to mint';
+    pub const TRANSFER_FAILED: felt252 = 'Token transfer failed';
+    pub const MIN_HOLD_PERIOD: felt252 = 'Min hold period not met';
+    pub const INVALID_SWAP_IDS: felt252 = 'Invalid swap IDs array';
+    pub const DIVISION_BY_ZERO: felt252 = 'Division by zero';
+    pub const INVALID_ADDRESS: felt252 = 'Invalid address';
+}
