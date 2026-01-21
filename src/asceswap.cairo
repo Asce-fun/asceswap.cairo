@@ -3,8 +3,15 @@ pub mod Asceswap {
     use core::num::traits::Zero;
     use openzeppelin_access::ownable::OwnableComponent;
     use openzeppelin_introspection::src5::SRC5Component;
+    use openzeppelin_security::PausableComponent::{
+        InternalTrait as PausableInternalTrait, PausableImpl,
+    };
+    use openzeppelin_security::ReentrancyGuardComponent::InternalTrait as ReentrancyGuardTrait;
+    use openzeppelin_security::{PausableComponent, ReentrancyGuardComponent};
     use openzeppelin_token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use openzeppelin_upgrades::UpgradeableComponent;
+
+    // use openzeppelin_
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
@@ -12,6 +19,7 @@ pub mod Asceswap {
     use starknet::{
         ClassHash, ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,
     };
+    use crate::components::Security::SecurityComponent;
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
     use crate::interfaces::asce_swap::IAsceSwap;
@@ -22,29 +30,36 @@ pub mod Asceswap {
     };
 
 
+    #[abi(embed_v0)]
+    impl SecurityImpl = SecurityComponent::SecurityImpl<ContractState>;
+    impl SecurityInternalImpl = SecurityComponent::InternalImpl<ContractState>;
+    impl ReentrancyGuardInternalImpl = ReentrancyGuardComponent::InternalImpl<ContractState>;
+
+
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
-    component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
     component!(path: UpgradeableComponent, storage: upgradeable, event: UpgradeableEvent);
+    component!(path: PausableComponent, storage: pausable, event: PausableEvent);
+    component!(path: ReentrancyGuardComponent, storage: renack, event: ReentrancyGuardEvent);
+    component!(path: SecurityComponent, storage: security, event: SecurityEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[abi(embed_v0)]
     impl ERC721MixinImpl = ERC721Component::ERC721MixinImpl<ContractState>;
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
 
-    #[abi(embed_v0)]
-    impl OwnableMixinImpl = OwnableComponent::OwnableMixinImpl<ContractState>;
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
-
-    impl UpgradeableInternalImpl = UpgradeableComponent::InternalImpl<ContractState>;
 
     #[storage]
     pub struct Storage {
         #[substorage(v0)]
         erc721: ERC721Component::Storage,
         #[substorage(v0)]
-        ownable: OwnableComponent::Storage,
-        #[substorage(v0)]
         upgradeable: UpgradeableComponent::Storage,
+        #[substorage(v0)]
+        pausable: PausableComponent::Storage,
+        #[substorage(v0)]
+        renack: ReentrancyGuardComponent::Storage,
+        #[substorage(v0)]
+        security: SecurityComponent::Storage,
         #[substorage(v0)]
         src5: SRC5Component::Storage,
         treasury: ContractAddress,
@@ -62,11 +77,15 @@ pub mod Asceswap {
     #[derive(Drop, starknet::Event)]
     pub enum Event {
         #[flat]
-        ERC721Event: ERC721Component::Event,
-        #[flat]
-        OwnableEvent: OwnableComponent::Event,
-        #[flat]
         UpgradeableEvent: UpgradeableComponent::Event,
+        #[flat]
+        PausableEvent: PausableComponent::Event,
+        #[flat]
+        ReentrancyGuardEvent: ReentrancyGuardComponent::Event,
+        #[flat]
+        SecurityEvent: SecurityComponent::Event,
+        #[flat]
+        ERC721Event: ERC721Component::Event,
         #[flat]
         SRC5Event: SRC5Component::Event,
         MarketPairCreated: MarketPairCreated,
@@ -84,13 +103,13 @@ pub mod Asceswap {
 
     fn constructor(
         ref self: ContractState,
-        owner: ContractAddress,
+        access_registry: ContractAddress,
         treasury: ContractAddress,
         initial_fees: ProtocolFees,
     ) {
         self.erc721.initializer("AsceSwap Position", "ASCE-POS", "");
-        self.ownable.initializer(owner);
         self.treasury.write(treasury);
+        self.security._set_access_control(access_registry);
         self.protocol_fees.write(initial_fees);
         self.next_market_id.write(1);
         self.next_swap_id.write(1);
@@ -103,8 +122,9 @@ pub mod Asceswap {
         // LP? what's in for them?
         //protocol fees on swaps goes to protocol treasury
         fn create_market_pair(ref self: ContractState, params: MarketParams) -> (u256, u256) {
+            self.security._renack_start();
             if self.permissioned_flag.read() {
-                self.ownable.assert_only_owner();
+                self.security.assert_admin_role();
             }
             self._assert_not_paused();
             self._validate_market_params(params);
@@ -153,20 +173,15 @@ pub mod Asceswap {
                         swap_token: params.swap_token,
                     },
                 );
-
+            self.security._renack_end();
             (fixed_market_id, floating_market_id)
-        }
-
-        fn upgrade_class_hash(ref self: ContractState, new_class_hash: ClassHash) {
-            self.ownable.assert_only_owner();
-            self.upgradeable.upgrade(new_class_hash);
         }
     }
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
         fn _assert_not_paused(self: @ContractState) {
-            assert(!self.protocol_paused.read(), Errors::PROTOCOL_PAUSED);
+            assert(!self.security.is_paused(), Errors::PROTOCOL_PAUSED);
         }
 
         fn _validate_market_params(self: @ContractState, params: MarketParams) {
