@@ -11,6 +11,8 @@ openzeppelin_token ="3.0.0"
 openzeppelin_access = "3.0.0"
 openzeppelin_upgrades ="3.0.0"
 openzeppelin_introspection ="3.0.0"
+openzeppelin_security="3.0.0"
+openzeppelin="3.0.0"
 
 
 [dev-dependencies]
