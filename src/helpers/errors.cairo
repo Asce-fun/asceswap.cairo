@@ -34,3 +34,4 @@ pub mod Errors {
     pub const DIVISION_BY_ZERO: felt252 = 'Division by zero';
     pub const INVALID_ADDRESS: felt252 = 'Invalid address';
 }
+
