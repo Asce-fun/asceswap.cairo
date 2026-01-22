@@ -224,47 +224,6 @@ pub mod Asceswap {
 
             self.emit(MarketUnpaused { market_id });
         }
-
-        fn supply_lp_collateral(ref self: ContractState, market_id: u256, amount: u256) -> u256 {
-            self._assert_not_paused();
-
-            let mut market = self.markets.read(market_id);
-            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_FOUND);
-            // assert(amount >= MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
-
-            let caller = get_caller_address();
-
-            // Transfer tokens from LP
-            let token_dispatcher = IERC20Dispatcher { contract_address: market.params.swap_token };
-            let transfer_success = token_dispatcher
-                .transfer_from(caller, get_contract_address(), amount);
-            assert(transfer_success, Errors::TRANSFER_FAILED);
-
-            // Calculate shares to mint (rounds DOWN - user gets fewer shares)
-            let shares_to_mint = calculate_shares_to_mint(
-                amount, market.total_lp_shares, market.total_lp_collateral,
-            );
-            assert(shares_to_mint >= MIN_SHARES, Errors::BELOW_MIN_SHARES);
-
-            // Update LP position
-            let mut lp_position = self.lp_positions.read((caller, market_id));
-            lp_position.shares += shares_to_mint;
-            self.lp_positions.write((caller, market_id), lp_position);
-
-            // Update market
-            market.total_lp_shares += shares_to_mint;
-            market.total_lp_collateral += amount;
-            self.markets.write(market_id, market);
-
-            self
-                .emit(
-                    LpCollateralSupplied {
-                        lp: caller, market_id, amount, shares_minted: shares_to_mint,
-                    },
-                );
-
-            shares_to_mint
-        }
     }
 
     #[generate_trait]
