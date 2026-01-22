@@ -89,6 +89,8 @@ pub mod Asceswap {
         #[flat]
         SRC5Event: SRC5Component::Event,
         MarketPairCreated: MarketPairCreated,
+        MarketPaused: MarketPaused,
+        MarketUnpaused: MarketUnpaused,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -99,6 +101,18 @@ pub mod Asceswap {
         pub floating_market_id: u256,
         pub reference_rate_oracle: ContractAddress,
         pub swap_token: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct MarketPaused {
+        #[key]
+        pub market_id: u256,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct MarketUnpaused {
+        #[key]
+        pub market_id: u256,
     }
 
     fn constructor(
@@ -121,14 +135,20 @@ pub mod Asceswap {
         // shouldn't market maker be allowed to specify how their markets can be : who can act as an
         // LP? what's in for them?
         //protocol fees on swaps goes to protocol treasury
-        fn create_market_pair(ref self: ContractState, params: MarketParams) -> (u256, u256) {
+        fn create_market_pair(
+            ref self: ContractState, params: MarketParams, curator: ContractAddress,
+        ) -> (u256, u256) {
             self.security._renack_start();
             if self.permissioned_flag.read() {
                 self.security.assert_admin_role();
             }
             self._assert_not_paused();
             self._validate_market_params(params);
+            assert(!curator.is_zero(), Errors::INVAID_ADDRESS);
             let market_creation_fee = self.protocol_fees.read().market_creation_fee;
+
+            /// @notice: TODO: if the process permissionless we need to add an way to add roles and
+            /// permissions for the respective markets
 
             //transfer the market creation fee to treasury
             if market_creation_fee > 0 {
@@ -136,7 +156,9 @@ pub mod Asceswap {
                 let fee_token = IERC20Dispatcher {
                     contract_address: contract_address_const::<0>(),
                 };
-                fee_token.transfer_from(caller, self.treasury.read(), market_creation_fee);
+                let success = fee_token
+                    .transfer_from(caller, self.treasury.read(), market_creation_fee);
+                assert(success, Errors::TRANSFER_FAILED);
             }
 
             let fixed_market_id = self.next_market_id.read();
@@ -150,6 +172,10 @@ pub mod Asceswap {
             // Create floating market
             let floating_market = self._create_market(RateType::Floating, fixed_market_id);
             self.markets.write(floating_market_id, floating_market);
+
+            // let access_registry: IAccessExtra = self.security.get_access_control();
+            // access_registry.set_role_admin(floating_market_id as felt252, curator);
+            // access_registry.set_role_admin(floating_market_id as felt252, curator);
 
             // Initialize rate indices
             let current_rate = self
@@ -175,6 +201,69 @@ pub mod Asceswap {
                 );
             self.security._renack_end();
             (fixed_market_id, floating_market_id)
+        }
+
+        fn pause_market(ref self: ContractState, market_id: u256) {
+            self.security.assert_admin_role();
+
+            let mut market = self.markets.read(market_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_FOUND);
+            market.status = MarketStatus::Paused;
+            self.markets.write(market_id, market);
+
+            self.emit(MarketPaused { market_id });
+        }
+
+        fn unpause_market(ref self: ContractState, market_id: u256) {
+            self.security.assert_admin_role();
+
+            let mut market = self.markets.read(market_id);
+            assert(market.status == MarketStatus::Paused, Errors::MARKET_NOT_FOUND);
+            market.status = MarketStatus::Active;
+            self.markets.write(market_id, market);
+
+            self.emit(MarketUnpaused { market_id });
+        }
+
+        fn supply_lp_collateral(ref self: ContractState, market_id: u256, amount: u256) -> u256 {
+            self._assert_not_paused();
+
+            let mut market = self.markets.read(market_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_FOUND);
+            // assert(amount >= MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
+
+            let caller = get_caller_address();
+
+            // Transfer tokens from LP
+            let token_dispatcher = IERC20Dispatcher { contract_address: market.params.swap_token };
+            let transfer_success = token_dispatcher
+                .transfer_from(caller, get_contract_address(), amount);
+            assert(transfer_success, Errors::TRANSFER_FAILED);
+
+            // Calculate shares to mint (rounds DOWN - user gets fewer shares)
+            let shares_to_mint = calculate_shares_to_mint(
+                amount, market.total_lp_shares, market.total_lp_collateral,
+            );
+            assert(shares_to_mint >= MIN_SHARES, Errors::BELOW_MIN_SHARES);
+
+            // Update LP position
+            let mut lp_position = self.lp_positions.read((caller, market_id));
+            lp_position.shares += shares_to_mint;
+            self.lp_positions.write((caller, market_id), lp_position);
+
+            // Update market
+            market.total_lp_shares += shares_to_mint;
+            market.total_lp_collateral += amount;
+            self.markets.write(market_id, market);
+
+            self
+                .emit(
+                    LpCollateralSupplied {
+                        lp: caller, market_id, amount, shares_minted: shares_to_mint,
+                    },
+                );
+
+            shares_to_mint
         }
     }
 
