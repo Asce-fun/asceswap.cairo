@@ -1,6 +1,7 @@
 pub mod Errors {
     pub const INVALID_ORACLE: felt252 = 'Invalid oracle address';
     pub const INVALID_TOKEN: felt252 = 'Invalid token address';
+    pub const INVAID_ADDRESS: felt252 = 'Invalid address';
     pub const INVALID_THRESHOLD: felt252 = 'Threshold must be 50-95%';
     pub const INVALID_TERM: felt252 = 'Term must be 1-365 days';
     pub const INVALID_FEE: felt252 = 'Fee exceeds maximum';
