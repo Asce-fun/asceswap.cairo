@@ -9,7 +9,7 @@ use crate::types::asce_swap::{
 pub trait IAsceSwap<TContractState> {
     /// Create a paired market (fixed + floating)
     fn create_market_pair(
-        ref self: TContractState, params: MarketParams,
+        ref self: TContractState, params: MarketParams, curator: ContractAddress,
     ) -> (u256, u256); // (fixed_market_id, floating_market_id)
 
     /// Pause a market
