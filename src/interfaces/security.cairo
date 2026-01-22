@@ -7,4 +7,5 @@ pub trait ISecurity<TState> {
     fn unpause(ref self: TState);
     fn is_paused(self: @TState) -> bool;
     fn set_access_control(ref self: TState, access_control: ContractAddress);
+    fn get_access_control(self: @TState) -> ContractAddress;
 }
