@@ -73,6 +73,11 @@ pub mod SecurityComponent {
             self.assert_admin_role();
             self._set_access_control(access_control);
         }
+
+        fn get_access_control(self: @ComponentState<TContractState>) -> ContractAddress {
+            let access_control = self.accessControl.read();
+            access_control.contract_address
+        }
     }
 
     #[generate_trait]
