@@ -79,6 +79,7 @@ pub mod Asceswap {
         // Next swap ID
         next_swap_id: u256,
         markets: Map<felt252, MarketPair>,
+        protocol_fees: Map<ContractAddress, u256>,
     }
 
 
@@ -100,6 +101,8 @@ pub mod Asceswap {
         MarketPairCreated: MarketPairCreated,
         MarketPaused: MarketPaused,
         MarketUnpaused: MarketUnpaused,
+        FlagSetted: FlagSetted,
+        ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -120,6 +123,18 @@ pub mod Asceswap {
     pub struct MarketUnpaused {
         #[key]
         pub pair_id: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct FlagSetted {
+        pub flag: bool,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ProtocolFeesWithdrawn {
+        pub token: ContractAddress,
+        pub amount: u256,
+        pub recipient: ContractAddress,
     }
 
     #[constructor]
@@ -241,6 +256,34 @@ pub mod Asceswap {
         fn set_premission_less_flag(ref self: ContractState, flag: bool) {
             self.security.assert_admin_role();
             self.permissioned_flag.write(flag);
+            self.emit(FlagSetted { flag });
+        }
+
+        fn update_protocol_config(ref self: ContractState, config: ProtocolConfig) {
+            self.security.assert_admin_role();
+            assert(!config.treasury.is_zero(), Errors::ZERO_ADDRESS);
+            self.protocol_config.write(config);
+        }
+
+        fn withdraw_protocol_fees(
+            ref self: ContractState,
+            token: ContractAddress,
+            amount: u256,
+            recipient: ContractAddress,
+        ) {
+            self.security.assert_admin_role();
+            assert(!recipient.is_zero(), Errors::ZERO_ADDRESS);
+
+            let available = self.protocol_fees.read(token);
+            assert(amount <= available, Errors::INSUFFICIENT_COLLATERAL);
+
+            self.protocol_fees.write(token, available - amount);
+
+            let token_contract = IERC20Dispatcher { contract_address: token };
+            let success = token_contract.transfer(recipient, amount);
+            assert(success, Errors::TRANSFER_FAILED);
+
+            self.emit(ProtocolFeesWithdrawn { token, amount, recipient });
         }
     }
 
