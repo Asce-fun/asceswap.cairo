@@ -53,8 +53,8 @@ pub mod AccessRgistry {
     /// @notice Initializer function required during for initial deployment of contract.
     /// @param superAdmin
     #[constructor]
-    fn constructor(ref self: ContractState, superAdmin: ContractAddress) {
-        self.initialize(superAdmin);
+    fn constructor(ref self: ContractState, admin: ContractAddress) {
+        self.initialize(admin);
     }
 
     ////////////////////////////////
