@@ -61,12 +61,6 @@ pub trait IAsceSwap<TContractState> {
     /// Withdraw accumulated protocol fees
     fn withdraw_protocol_fees(ref self: TContractState, token: ContractAddress, amount: u256);
 
-    /// Pause entire protocol
-    fn pause_protocol(ref self: TContractState);
-
-    /// Unpause protocol
-    fn unpause_protocol(ref self: TContractState);
-
     /// Get market details
     fn get_market(self: @TContractState, market_id: u256) -> Market;
 
@@ -112,5 +106,4 @@ pub trait IAsceSwap<TContractState> {
     /// Get next swap ID
     fn get_next_swap_id(self: @TContractState) -> u256;
 
-    fn upgrade_class_hash(ref self: TContractState, new_class_hash: ClassHash);
 }
