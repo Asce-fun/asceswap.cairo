@@ -10,7 +10,7 @@ pub enum RateType {
 pub enum LiquidationSide {
     #[default]
     Buyer,
-    LP,
+    Lp,
 }
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
