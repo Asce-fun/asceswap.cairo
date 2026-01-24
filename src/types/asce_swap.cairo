@@ -1,17 +1,26 @@
 use starknet::{ContractAddress, contract_address_const};
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
-pub enum RateType {
+pub enum SwapSide {
     #[default]
     Fixed,
     Floating,
 }
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
-pub enum LiquidationSide {
+pub enum SwapStatus {
     #[default]
-    Buyer,
-    Lp,
+    Active,
+    Settled,
+    Liquidated,
+    ExitedEarly,
 }
+
+// #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
+// pub enum LiquidationSide {
+//     #[default]
+//     Buyer,
+//     Lp,
+// }
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
 pub enum MarketStatus {
@@ -32,166 +41,148 @@ pub struct SignedValue {
 /// Market parameters set at creation time
 #[derive(Drop, Copy, Serde, Debug, starknet::Store)]
 pub struct MarketParams {
-    pub collateral_price_oracle: ContractAddress,
-    pub reference_rate_oracle: ContractAddress,
-    pub swap_token: ContractAddress,
-    pub liquidation_threshold: u16, // bps (e.g., 8500 = 85%)
-    pub swap_term: u64, // in seconds
-    pub fee_spread: u16, // bps 
-    pub min_util_fee: u16, // bps
-    pub max_util_fee: u16, // bps
-    pub max_rate_adjustment: u16, // bps
-    pub early_exit_fee: u16, // bps
-    pub liquidation_incentive: u16, // bps
-    pub max_oracle_staleness: u64, // in seconds
-    pub min_notional: u256 //// minimum notional in token units
+    ///Risk Parameters
+    pub liquidation_threshold_bps: u256,
+    pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
+    pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
+    ///Term Parameter
+    pub swap_term_seconds: u64, // Duration of swaps
+    pub min_hold_period_seconds: u64, // Before early exit allowed
+    /// Fee Parameters (in BPS)
+    pub swap_fee_bps: u256, // On collateral at entry
+    pub early_exit_fee_bps: u256, // Penalty for early exit
+    pub liquidation_bonus_bps: u256, // Incentive for liquidators
+    ///Rate Parameters
+    pub fee_spread_bps: u256,
+    pub max_imbalance_adjustment_bps: u256,
+    pub max_utilization_bps: u256,
+    pub insurance_share_bps: u256,
+    ///Bounds
+    pub min_notional: u256,
+    pub max_notional_per_swap: u256,
+    pub max_oracle_staleness_seconds: u64,
+    pub max_rate_change_per_update_bps: u256, // Rate change limit
+    pub min_rate_bps: u256, // Floor (can be 0)
+    pub max_rate_bps: u256 // Ceiling (e.g., 1000000 = 10000%)
 }
 
 
-///Market State and Accounting Info
 #[derive(Drop, Copy, Serde, Debug, starknet::Store)]
-pub struct Market {
-    pub status: MarketStatus,
-    pub rate_type: RateType,
-    pub paired_market_id: u256, // the market id of the paired market (fixed/float)
-    pub params: MarketParams,
-    pub total_lp_collateral: u256, // total collateral supplied by LPs
-    pub total_lp_shares: u256, // total shares issued to LPs
-    pub locked_lp_collateral: u256 // collateral locked in open swaps
+pub struct LpPool {
+    pub total_collateral: u256,
+    pub locked_for_fixed: u256,
+    pub locked_for_floating: u256,
+    pub total_shares: u256,
+    pub insurance_fund: u256,
 }
 
-//Individual Swap Info
-#[derive(Drop, Copy, Serde, Debug, starknet::Store)]
-pub struct Swap {
-    pub market_id: u256,
-    pub notional_amount: u256,
-    pub fixed_rate: u256,
-    pub buyer_collateral: u256, // token amount
-    pub lp_collateral: u256, // token amount
-    pub required_collateral_usd: u256, // USD value at creation (18 decimals)
-    pub start_time: u64,
-    pub expiration_time: u64,
-    pub start_cumulative_rate_time: u256,
-    pub is_settled: bool,
-    pub is_liquidated: bool,
-}
-
-
-/// Rate index for TWA calculation
-#[derive(Drop, Copy, Serde, starknet::Store)]
+#[derive(Drop, Copy, Serde, starknet::Store, Debug)]
+///Rate Tracking for TWA calculation
 pub struct RateIndex {
     pub last_update_time: u64,
-    pub last_rate: u256, // bps
-    pub cumulative_rate_time: u256 // Σ(rate × Δtime)
+    pub last_rate_bps: u256, // Rate in basis points
+    pub cumulative_rate_time: u256, // Σ(rate × seconds)
+    pub last_valid_rate_bps: u256 // For rate change limiting
 }
 
-/// LP position in a market
+/// A market pair combines both directions of a rate swap
+#[derive(Drop, Copy, Serde, starknet::Store, Debug)]
+pub struct MarketPair {
+    pub pair_id: felt252,
+    pub status: MarketStatus,
+    // Oracle addresses
+    pub rate_oracle: ContractAddress,
+    //curator address
+    pub curator: ContractAddress,
+    // Collateral token
+    pub collateral_token: ContractAddress,
+    pub decimals: u8,
+    // Parameters
+    pub params: MarketParams,
+    // Pool state
+    pub pool: LpPool,
+    // Rate index
+    pub rate_index: RateIndex,
+    // Counters
+    pub total_swaps_created: u256,
+    pub active_swap_count: u256,
+}
+
+
+/// Individual swap position
+#[derive(Drop, Copy, Serde, starknet::Store)]
+pub struct Swap {
+    pub swap_id: u256,
+    pub pair_id: felt252,
+    // pub owner: ContractAddress,
+    pub side: SwapSide,
+    pub status: SwapStatus,
+    // Position details (all in collateral token units)
+    pub notional: u256,
+    pub fixed_rate_bps: u256,
+    pub buyer_collateral: u256,
+    pub lp_collateral_locked: u256,
+    pub initial_required_margin: u256, // Margin requirement at creation
+    // Timing
+    pub start_time: u64,
+    pub expiration_time: u64,
+    // TWA tracking
+    pub start_cumulative_rate: u256,
+}
+
+
+/// LP position for a specific market pair
 #[derive(Drop, Copy, Serde, starknet::Store)]
 pub struct LpPosition {
     pub shares: u256,
+    pub last_deposit_time: u64,
 }
 
 
-/// Protocol fee configuration
+/// Protocol-wide configuration
 #[derive(Drop, Copy, Serde, starknet::Store)]
-pub struct ProtocolFees {
-    pub market_creation_fee: u256, // flat amount in native token
-    pub swap_fee_bps: u16, // % of collateral
-    pub early_exit_fee_bps: u16, // % of collateral
-    pub liquidation_reward_bps: u16, // % of seized collateral
-    pub protocol_share_bps: u16 // % of fees to treasury
+pub struct ProtocolConfig {
+    pub treasury: ContractAddress,
+    pub protocol_fee_share_bps: u256, // % of collected fees to treasury
+    pub min_first_lp_deposit: u256, // Minimum for first LP
+    pub burned_shares_amount: u256, // Shares burned on first deposit
+    pub market_creation_fees: u256,
 }
 
 
-/// Market liquidity info
+/// Swap rate quote
 #[derive(Drop, Copy, Serde)]
-pub struct MarketLiquidity {
-    pub total_collateral: u256,
-    pub available_collateral: u256,
-    pub utilization_bps: u256,
-}
-
-/// Default implementations
-pub impl DefaultMarket of Default<Market> {
-    fn default() -> Market {
-        Market {
-            status: MarketStatus::Closed,
-            rate_type: RateType::Fixed,
-            paired_market_id: 0,
-            params: Default::default(),
-            total_lp_collateral: 0,
-            locked_lp_collateral: 0,
-            total_lp_shares: 0,
-        }
-    }
+pub struct SwapQuote {
+    pub base_rate_bps: u256,
+    pub imbalance_adjustment_bps: u256,
+    pub adjustment_is_positive: bool,
+    pub fee_spread_bps: u256,
+    pub final_rate_bps: u256,
+    pub required_collateral: u256,
+    pub lp_collateral_to_lock: u256,
 }
 
 
-pub impl DefaultMarketParams of Default<MarketParams> {
-    fn default() -> MarketParams {
-        MarketParams {
-            collateral_price_oracle: contract_address_const::<0>(),
-            reference_rate_oracle: contract_address_const::<0>(),
-            swap_token: contract_address_const::<0>(),
-            liquidation_threshold: 0,
-            swap_term: 0,
-            fee_spread: 0,
-            min_util_fee: 0,
-            max_util_fee: 0,
-            max_rate_adjustment: 0,
-            early_exit_fee: 0,
-            liquidation_incentive: 0,
-            max_oracle_staleness: 0,
-            min_notional: 0,
-        }
-    }
+/// Health status of a swap
+#[derive(Drop, Copy, Serde)]
+pub struct HealthStatus {
+    pub current_pnl: SignedValue,
+    pub buyer_remaining_value: u256,
+    pub required_margin: u256,
+    pub health_factor_bps: u256,
+    pub is_liquidatable: bool,
+    pub time_to_expiry_seconds: u64,
 }
 
-pub impl DefaultSwap of Default<Swap> {
-    fn default() -> Swap {
-        Swap {
-            market_id: 0,
-            notional_amount: 0,
-            fixed_rate: 0,
-            buyer_collateral: 0,
-            lp_collateral: 0,
-            required_collateral_usd: 0,
-            start_time: 0,
-            expiration_time: 0,
-            start_cumulative_rate_time: 0,
-            is_settled: false,
-            is_liquidated: false,
-        }
-    }
-}
 
-pub impl DefaultRateIndex of Default<RateIndex> {
-    fn default() -> RateIndex {
-        RateIndex { last_update_time: 0, last_rate: 0, cumulative_rate_time: 0 }
-    }
-}
-
-pub impl DefaultLpPosition of Default<LpPosition> {
-    fn default() -> LpPosition {
-        LpPosition { shares: 0 }
-    }
-}
-
-pub impl DefaultProtocolFees of Default<ProtocolFees> {
-    fn default() -> ProtocolFees {
-        ProtocolFees {
-            market_creation_fee: 0,
-            swap_fee_bps: 0,
-            early_exit_fee_bps: 0,
-            liquidation_reward_bps: 0,
-            protocol_share_bps: 0,
-        }
-    }
-}
-
-pub impl DefaultSignedValue of Default<SignedValue> {
-    fn default() -> SignedValue {
-        SignedValue { value: 0, is_negative: false }
-    }
+/// LP pool analytics
+#[derive(Drop, Copy, Serde)]
+pub struct PoolAnalytics {
+    pub total_value: u256,
+    pub available_liquidity: u256,
+    pub utilization_fixed_bps: u256,
+    pub utilization_floating_bps: u256,
+    pub net_exposure_notional: SignedValue,
+    pub insurance_fund_value: u256,
 }
 
