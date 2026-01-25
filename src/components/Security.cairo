@@ -19,6 +19,7 @@ pub mod SecurityComponent {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ClassHash, ContractAddress, get_caller_address};
     use crate::helpers::roles::Roles;
+    use crate::interfaces::access_registry::{IAccessExtraDispatcher, IAccessExtraDispatcherTrait};
     use crate::interfaces::security::ISecurity;
 
 
@@ -122,6 +123,14 @@ pub mod SecurityComponent {
         fn assert_not_paused(self: @ComponentState<TContractState>) {
             let pausable = get_dep_component!(self, Pausable);
             assert(!pausable.is_paused(), Errors::PAUSED);
+        }
+        fn set_role_from_admin(
+            ref self: ComponentState<TContractState>, role: felt252, curator: ContractAddress,
+        ) {
+            let accessControl: IAccessExtraDispatcher = IAccessExtraDispatcher {
+                contract_address: self.accessControl.read().contract_address,
+            };
+            accessControl.set_role_from_admin(role, curator);
         }
     }
 }
