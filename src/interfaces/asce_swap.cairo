@@ -24,8 +24,6 @@ pub trait IAsceSwap<TContractState> {
     /// Unpause a market
     fn unpause_market(ref self: TContractState, pair_id: felt252);
 
-    /// Update market parameters
-    fn update_market_params(ref self: TContractState, pair_id: felt252, params: MarketParams);
 
     /// Update protocol config
     fn update_protocol_config(ref self: TContractState, config: ProtocolConfig);
@@ -59,9 +57,6 @@ pub trait IAsceSwap<TContractState> {
 
     /// Liquidate an unhealthy position
     fn liquidate(ref self: TContractState, swap_id: u256);
-
-    /// Add collateral to an existing swap
-    fn add_collateral(ref self: TContractState, swap_id: u256, amount: u256);
 
     /// Get market pair info
     fn get_market(self: @TContractState, pair_id: felt252) -> MarketPair;
