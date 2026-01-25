@@ -90,5 +90,11 @@ pub mod AccessRgistry {
             self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
             self.accessControl.set_role_admin(role, admin_role);
         }
+
+        fn set_role_from_admin(ref self: ContractState, role: felt252, owner: ContractAddress) {
+            self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
+            self.accessControl._grant_role(role, owner);
+            self.accessControl.set_role_admin(role, role);
+        }
     }
 }
