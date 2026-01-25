@@ -8,8 +8,8 @@ pub enum SwapSide {
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
 pub enum SwapStatus {
-    #[default]
     Active,
+    #[default]
     Settled,
     Liquidated,
     ExitedEarly,
@@ -63,7 +63,9 @@ pub struct MarketParams {
     pub max_oracle_staleness_seconds: u64,
     pub max_rate_change_per_update_bps: u256, // Rate change limit
     pub min_rate_bps: u256, // Floor (can be 0)
-    pub max_rate_bps: u256 // Ceiling (e.g., 1000000 = 10000%)
+    pub max_rate_bps: u256, // Ceiling (e.g., 1000000 = 10000%)
+    //Lp type
+    pub is_lp_open: bool // is Lp provisiong open 
 }
 
 
