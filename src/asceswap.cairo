@@ -80,6 +80,8 @@ pub mod Asceswap {
         next_swap_id: u256,
         markets: Map<felt252, MarketPair>,
         protocol_fees: Map<ContractAddress, u256>,
+        // LP positions: (lp_address, pair_id) -> LpPosition
+        lp_positions: Map<(ContractAddress, felt252), LpPosition>,
     }
 
 
@@ -103,6 +105,17 @@ pub mod Asceswap {
         MarketUnpaused: MarketUnpaused,
         FlagSetted: FlagSetted,
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
+        LpDeposited: LpDeposited,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct LpDeposited {
+        #[key]
+        pub lp: ContractAddress,
+        #[key]
+        pub pair_id: felt252,
+        pub amount: u256,
+        pub shares_minted: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -225,6 +238,10 @@ pub mod Asceswap {
                 active_swap_count: 0,
             };
 
+            if params.is_lp_open {
+                self.security.set_role_from_admin(pair_id, curator);
+            }
+
             self.markets.write(pair_id, market);
 
             self._deduct_market_creation_fees();
@@ -250,6 +267,60 @@ pub mod Asceswap {
             market.status = MarketStatus::Active;
             self.markets.write(pair_id, market);
             self.emit(MarketUnpaused { pair_id });
+        }
+
+        fn supply_lp_collateral(ref self: ContractState, pair_id: felt252, amount: u256) -> u256 {
+            self.security._renack_start();
+            self._assert_not_paused();
+            assert(amount >= Constants::MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
+            let mut market = self.markets.read(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+
+            self._validate_lp_call(pair_id, market.params.is_lp_open);
+
+            let caller = get_caller_address();
+            let mut pool = market.pool;
+            let config = self.protocol_config.read();
+
+            let shares_to_mint = if pool.total_shares == 0 {
+                // First deposit - apply inflation protection
+                assert(amount >= config.min_first_lp_deposit, Errors::FIRST_DEPOSIT_TOO_SMALL);
+
+                // Shares = amount - burned
+                let shares = amount - config.burned_shares_amount;
+
+                // Total shares includes burned (owned by no one)
+                pool.total_shares = amount;
+                pool.total_collateral = amount;
+
+                shares
+            } else {
+                // Normal proportional calculation
+                let shares = calculate_shares_to_mint(
+                    amount, pool.total_shares, pool.total_collateral,
+                );
+
+                pool.total_shares = pool.total_shares + shares;
+                pool.total_collateral = pool.total_collateral + amount;
+
+                shares
+            };
+
+            let mut position = self.lp_positions.read((caller, pair_id));
+            position.shares = position.shares + shares_to_mint;
+            position.last_deposit_time = get_block_timestamp();
+            self.lp_positions.write((caller, pair_id), position);
+
+            market.pool = pool;
+            self.markets.write(pair_id, market);
+
+            let token = IERC20Dispatcher { contract_address: market.collateral_token };
+            let success = token.transfer_from(caller, get_contract_address(), amount);
+            assert(success, Errors::TRANSFER_FROM_FAILED);
+
+            self.emit(LpDeposited { lp: caller, pair_id, amount, shares_minted: shares_to_mint });
+
+            shares_to_mint
         }
 
         ///Market Creation Process
@@ -319,6 +390,12 @@ pub mod Asceswap {
         fn _validate_permission_call(self: @ContractState) {
             if self.permissioned_flag.read() {
                 self.security.assert_admin_role();
+            }
+        }
+
+        fn _validate_lp_call(self: @ContractState, pair_id: felt252, is_open: bool) {
+            if is_open {
+                self.security.assert_role(pair_id);
             }
         }
 
