@@ -1,7 +1,6 @@
 #[starknet::contract]
 pub mod Asceswap {
     use core::num::traits::Zero;
-    use openzeppelin_access::ownable::OwnableComponent;
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_security::PausableComponent::{
         InternalTrait as PausableInternalTrait, PausableImpl,
@@ -16,10 +15,7 @@ pub mod Asceswap {
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::{
-        ClassHash, ContractAddress, contract_address_const, get_block_timestamp, get_caller_address,
-        get_contract_address,
-    };
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use crate::components::Security::SecurityComponent;
     use crate::helpers::constants::Constants;
     use crate::helpers::core_utils::*;
@@ -113,6 +109,7 @@ pub mod Asceswap {
         SwapSettled: SwapSettled,
         SwapExitedEarly: SwapExitedEarly,
         SwapLiquidated: SwapLiquidated,
+        ProtocolConfigUpdated: ProtocolConfigUpdated,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -223,6 +220,10 @@ pub mod Asceswap {
         pub liquidator_bonus: u256,
         pub remaining_to_pool: u256,
     }
+    #[derive(Drop, starknet::Event)]
+    pub struct ProtocolConfigUpdated {
+        pub config: ProtocolConfig,
+    }
 
     #[constructor]
     fn constructor(
@@ -236,13 +237,14 @@ pub mod Asceswap {
             protocol_fee_share_bps: 2000, // 20% of fees to protocol
             min_first_lp_deposit: Constants::DEFAULT_MIN_FIRST_LP_DEPOSIT,
             burned_shares_amount: Constants::MIN_BURNED_SHARES,
-            market_creation_fees: Constants::MARKET_CREATION_FESS,
+            market_creation_fees: Constants::MARKET_CREATION_FEE,
         };
 
         self.protocol_config.write(config);
 
         self.next_pair_id.write(1);
         self.next_swap_id.write(1);
+        self.security._set_access_control(access_registry);
     }
 
     #[abi(embed_v0)]
@@ -300,7 +302,6 @@ pub mod Asceswap {
                     locked_for_fixed: 0,
                     locked_for_floating: 0,
                     total_shares: 0,
-                    insurance_fund: 0,
                 },
                 rate_index: RateIndex {
                     last_update_time: current_time,
@@ -312,7 +313,7 @@ pub mod Asceswap {
                 active_swap_count: 0,
             };
 
-            if params.is_lp_open {
+            if params.is_lp_permissioned {
                 self.security.set_role_from_admin(pair_id, curator);
             }
 
@@ -351,7 +352,7 @@ pub mod Asceswap {
             let mut market = self.markets.read(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
 
-            self._validate_lp_call(pair_id, market.params.is_lp_open);
+            self._validate_lp_call(pair_id, market.params.is_lp_permissioned);
 
             let caller = get_caller_address();
             let mut pool = market.pool;
@@ -408,6 +409,11 @@ pub mod Asceswap {
             let caller = get_caller_address();
             let mut position = self.lp_positions.read((caller, pair_id));
             assert(position.shares >= shares, Errors::INSUFFICIENT_SHARES);
+            let current_time = get_block_timestamp();
+            assert(
+                current_time >= position.last_deposit_time + Constants::MIN_LP_COOLDOWN_SECONDS,
+                Errors::LP_COOLDOWN_NOT_MET,
+            );
 
             let mut pool = market.pool;
 
@@ -419,8 +425,7 @@ pub mod Asceswap {
             // Check available liquidity (not locked)
             let available = pool.total_collateral
                 - pool.locked_for_fixed
-                - pool.locked_for_floating
-                - pool.insurance_fund;
+                - pool.locked_for_floating;
             assert(withdrawal_amount <= available, Errors::EXCEEDS_AVAILABLE_LIQUIDITY);
 
             position.shares = position.shares - shares;
@@ -490,11 +495,11 @@ pub mod Asceswap {
 
             //  CALCULATE Fees
             let swap_fee = calculate_fee(collateral, market.params.swap_fee_bps);
-            let insurance_portion = calculate_fee(swap_fee, market.params.insurance_share_bps);
+            // let insurance_portion = calculate_fee(swap_fee, market.params.insurance_share_bps);
             let protocol_portion = calculate_fee(
                 swap_fee, self.protocol_config.read().protocol_fee_share_bps,
             );
-            let lp_fee_portion = swap_fee - insurance_portion - protocol_portion;
+            let lp_fee_portion = swap_fee - protocol_portion;
             let net_collateral = collateral - swap_fee;
 
             assert(net_collateral >= required_margin, Errors::INSUFFICIENT_COLLATERAL);
@@ -503,8 +508,7 @@ pub mod Asceswap {
             let mut pool = market.pool;
             let available = pool.total_collateral
                 - pool.locked_for_fixed
-                - pool.locked_for_floating
-                - pool.insurance_fund;
+                - pool.locked_for_floating;
             assert(available >= lp_collateral_needed, Errors::INSUFFICIENT_LIQUIDITY);
 
             // Check utilization cap
@@ -550,8 +554,6 @@ pub mod Asceswap {
                 },
             }
 
-            // Add insurance and LP portions
-            pool.insurance_fund = pool.insurance_fund + insurance_portion;
             pool.total_collateral = pool.total_collateral + lp_fee_portion;
 
             market.pool = pool;
@@ -663,7 +665,7 @@ pub mod Asceswap {
         fn early_exit(ref self: ContractState, swap_id: u256) {
             self.security._renack_start();
             self._assert_not_paused();
-            // === CHECKS ===
+
             let mut swap = self.swaps.read(swap_id);
             assert(swap.status == SwapStatus::Active, Errors::SWAP_NOT_ACTIVE);
 
@@ -690,7 +692,7 @@ pub mod Asceswap {
             let pnl = self._calculate_pnl_partial(@swap, twa_rate, current_time);
 
             //  APPLY EARLY EXIT PENALTY
-            let penalty = calculate_fee(pnl.value, market.params.early_exit_fee_bps);
+            let penalty = calculate_fee(swap.buyer_collateral, market.params.early_exit_fee_bps);
             let adjusted_pnl = if pnl.is_negative {
                 // Loss increases by penalty
                 negative(pnl.value + penalty)
@@ -726,9 +728,6 @@ pub mod Asceswap {
                 pool.total_collateral = pool.total_collateral + lp_delta.value;
             }
 
-            // Add penalty to insurance
-            pool.insurance_fund = pool.insurance_fund + penalty;
-
             market.pool = pool;
             market.active_swap_count = market.active_swap_count - 1;
             self.markets.write(swap.pair_id, market);
@@ -760,6 +759,8 @@ pub mod Asceswap {
             assert(swap.status == SwapStatus::Active, Errors::SWAP_NOT_ACTIVE);
 
             let current_time = get_block_timestamp();
+
+            assert(current_time < swap.expiration_time, Errors::SWAP_EXPIRED_USE_SETTLE);
             let liquidator = get_caller_address();
             let owner = self.erc721.owner_of(swap_id);
             let mut market = self.markets.read(swap.pair_id);
@@ -881,8 +882,7 @@ pub mod Asceswap {
 
             let available = pool.total_collateral
                 - pool.locked_for_fixed
-                - pool.locked_for_floating
-                - pool.insurance_fund;
+                - pool.locked_for_floating;
 
             let util_fixed = if pool.total_collateral > 0 {
                 mul_div_down(pool.locked_for_fixed, Constants::BPS, pool.total_collateral)
@@ -909,7 +909,6 @@ pub mod Asceswap {
                 utilization_fixed_bps: util_fixed,
                 utilization_floating_bps: util_floating,
                 net_exposure_notional: net_exposure,
-                insurance_fund_value: pool.insurance_fund,
             }
         }
 
@@ -937,7 +936,17 @@ pub mod Asceswap {
         fn update_protocol_config(ref self: ContractState, config: ProtocolConfig) {
             self.security.assert_admin_role();
             assert(!config.treasury.is_zero(), Errors::ZERO_ADDRESS);
+            assert(
+                config.protocol_fee_share_bps <= (Constants::BPS / 5), Errors::INVALID_PARAMS,
+            ); // Max 20%
+            assert(
+                config.burned_shares_amount >= Constants::MIN_BURNED_SHARES, Errors::INVALID_PARAMS,
+            );
+            assert(
+                config.min_first_lp_deposit >= Constants::MIN_LP_DEPOSIT, Errors::INVALID_PARAMS,
+            );
             self.protocol_config.write(config);
+            self.emit(ProtocolConfigUpdated { config }); // Also emit event
         }
 
         fn withdraw_protocol_fees(
@@ -990,6 +999,11 @@ pub mod Asceswap {
             );
             assert(*params.min_notional > 0, Errors::INVALID_PARAMS);
             assert(*params.max_notional_per_swap >= *params.min_notional, Errors::INVALID_PARAMS);
+            assert(*params.min_margin_floor_bps <= Constants::BPS, Errors::INVALID_PARAMS);
+            assert(
+                *params.initial_margin_multiplier_bps >= Constants::MIN_MARGIN_MULTIPLIER_BPS,
+                Errors::INVALID_PARAMS,
+            );
         }
 
         fn _validate_permission_call(self: @ContractState) {
@@ -1177,7 +1191,7 @@ pub mod Asceswap {
         }
 
 
-        /// Calculate TWA rate for a swap (CRITICAL: capped at expiration)
+        /// Calculate TWA rate for a swap (capped at expiration)
         fn _calculate_twa(
             self: @ContractState, rate_index: @RateIndex, swap: @Swap, current_time: u64,
         ) -> u256 {
@@ -1185,7 +1199,7 @@ pub mod Asceswap {
             let start_time = *swap.start_time;
             let expiration_time = *swap.expiration_time;
 
-            // CRITICAL: Cap at expiration - never include post-expiration rates
+            // Cap at expiration - never include post-expiration rates
             let effective_end_time = min_u64(current_time, expiration_time);
 
             // Duration for TWA calculation
