@@ -15,7 +15,6 @@ pub mod SecurityComponent {
     // standard security components
     use openzeppelin_upgrades::UpgradeableComponent;
     use openzeppelin_upgrades::UpgradeableComponent::InternalTrait as UpgradeableInternalTrait;
-    use starknet::contract_address::contract_address_const;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ClassHash, ContractAddress, get_caller_address};
     use crate::helpers::roles::Roles;
