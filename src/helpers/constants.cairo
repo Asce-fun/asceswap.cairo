@@ -40,6 +40,10 @@ pub mod Constants {
     /// Maximum utilization per side (80%)
     pub const MAX_UTILIZATION_CAP_BPS: u256 = 8_000;
 
+    pub const MIN_LP_COOLDOWN_SECONDS: u64 = 3_600;
+
+    pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 10_000; // 100%)
+
 
     pub fn USDC() -> ContractAddress {
         contract_address_const::<
@@ -47,5 +51,5 @@ pub mod Constants {
         >()
     }
 
-    pub const MARKET_CREATION_FESS: u256 = 0;
+    pub const MARKET_CREATION_FEE: u256 = 0;
 }
