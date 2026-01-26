@@ -1,4 +1,4 @@
-use starknet::{ContractAddress, contract_address_const};
+use starknet::ContractAddress;
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
 pub enum SwapSide {
     #[default]
@@ -8,8 +8,9 @@ pub enum SwapSide {
 
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
 pub enum SwapStatus {
-    Active,
     #[default]
+    Uninitialized,
+    Active,
     Settled,
     Liquidated,
     ExitedEarly,
@@ -56,7 +57,6 @@ pub struct MarketParams {
     pub fee_spread_bps: u256,
     pub max_imbalance_adjustment_bps: u256,
     pub max_utilization_bps: u256,
-    pub insurance_share_bps: u256,
     ///Bounds
     pub min_notional: u256,
     pub max_notional_per_swap: u256,
@@ -65,7 +65,7 @@ pub struct MarketParams {
     pub min_rate_bps: u256, // Floor (can be 0)
     pub max_rate_bps: u256, // Ceiling (e.g., 1000000 = 10000%)
     //Lp type
-    pub is_lp_open: bool // is Lp provisiong open 
+    pub is_lp_permissioned: bool // is Lp provisiong open 
 }
 
 
@@ -75,7 +75,6 @@ pub struct LpPool {
     pub locked_for_fixed: u256,
     pub locked_for_floating: u256,
     pub total_shares: u256,
-    pub insurance_fund: u256,
 }
 
 #[derive(Drop, Copy, Serde, starknet::Store, Debug)]
@@ -185,6 +184,6 @@ pub struct PoolAnalytics {
     pub utilization_fixed_bps: u256,
     pub utilization_floating_bps: u256,
     pub net_exposure_notional: SignedValue,
-    pub insurance_fund_value: u256,
+    // pub insurance_fund_value: u256,
 }
 
