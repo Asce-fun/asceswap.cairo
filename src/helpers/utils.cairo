@@ -101,3 +101,32 @@ pub fn is_within_tolerance(value: u256, target: u256, tolerance_bps: u256) -> bo
     let max_diff = mul_div_up(target, tolerance_bps, Constants::BPS);
     diff <= max_diff
 }
+
+pub fn clamp(value: u256, min_val: u256, max_val: u256) -> u256 {
+    if value < min_val {
+        min_val
+    } else if value > max_val {
+        max_val
+    } else {
+        value
+    }
+}
+
+#[inline(always)]
+pub fn min_u64(a: u64, b: u64) -> u64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+#[inline(always)]
+pub fn max_u64(a: u64, b: u64) -> u64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+

@@ -1,187 +1,88 @@
 use crate::helpers::constants::Constants;
-use crate::helpers::fixed_point::{div_down, div_up, mul_div_down, mul_div_up};
-use crate::helpers::utils::pow10;
+use crate::helpers::fixed_point::*;
+use crate::helpers::utils::max;
 
 
-/// Calculate shares to mint for LP deposit
-/// Rounds DOWN - user receives fewer shares (protocol favored)
-pub fn calculate_shares_to_mint(
-    deposit_amount: u256, total_shares: u256, total_collateral: u256,
-) -> u256 {
-    if total_shares == 0 || total_collateral == 0 {
-        return deposit_amount; // First depositor: 1:1
-    }
-    // shares = (amount * total_shares) / total_collateral
-    // Round DOWN - user gets fewer shares
-    mul_div_down(deposit_amount, total_shares, total_collateral)
+//DOMAIN-SPECIFIC CALCULATIONS
+
+/// Calculate interest payment over a term
+/// payment = notional × rate_bps × term_seconds / (SECONDS_PER_YEAR × BPS)
+pub fn calculate_payment(notional: u256, rate_bps: u256, term_seconds: u64) -> u256 {
+    // Intermediate: notional * rate_bps
+    let rate_component = mul_div_down(notional, rate_bps, Constants::BPS);
+    // Apply term fraction
+    mul_div_down(rate_component, term_seconds.into(), Constants::SECONDS_PER_YEAR.into())
 }
 
-/// Calculate collateral to return for LP withdrawal
-/// Rounds DOWN - user receives less collateral (protocol favored)
+/// Calculate maximum exposure for a swap position
+pub fn calculate_max_exposure(notional: u256, rate_bps: u256, term_seconds: u64) -> u256 {
+    calculate_payment(notional, rate_bps, term_seconds)
+}
+
+/// Calculate required margin for a swap
+/// required = max_exposure × initial_margin_multiplier / BPS
+pub fn calculate_required_margin(
+    notional: u256, rate_bps: u256, term_seconds: u64, initial_margin_multiplier_bps: u256,
+) -> u256 {
+    let max_exposure = calculate_max_exposure(notional, rate_bps, term_seconds);
+    // Round UP - require more margin for safety
+    mul_div_up(max_exposure, initial_margin_multiplier_bps, Constants::BPS)
+}
+
+/// Calculate time-adjusted margin requirement
+/// As swap approaches expiration, required margin decreases (less time for adverse movement)
+pub fn calculate_time_adjusted_margin(
+    initial_margin: u256, remaining_seconds: u64, total_term_seconds: u64, min_floor_bps: u256,
+) -> u256 {
+    if remaining_seconds >= total_term_seconds {
+        return initial_margin;
+    }
+
+    if total_term_seconds == 0 {
+        return initial_margin;
+    }
+
+    // time_factor = remaining / total (in BPS for precision)
+    let time_factor_bps = mul_div_down(
+        remaining_seconds.into(), Constants::BPS, total_term_seconds.into(),
+    );
+
+    // Apply floor - never go below minimum
+    let effective_factor = max(time_factor_bps, min_floor_bps);
+
+    // adjusted = initial × factor / BPS
+    mul_div_down(initial_margin, effective_factor, Constants::BPS)
+}
+
+/// Calculate health factor
+/// health = remaining_value × BPS / required_margin
+pub fn calculate_health_factor(remaining_value: u256, required_margin: u256) -> u256 {
+    if required_margin == 0 {
+        return Constants::BPS; // 100% if no requirement
+    }
+    // Round DOWN - health appears lower, triggers liquidation earlier (safer)
+    mul_div_down(remaining_value, Constants::BPS, required_margin)
+}
+
+/// Calculate LP shares to mint (round DOWN - user gets less)
+pub fn calculate_shares_to_mint(deposit: u256, total_shares: u256, total_collateral: u256) -> u256 {
+    if total_shares == 0 || total_collateral == 0 {
+        return deposit;
+    }
+    mul_div_down(deposit, total_shares, total_collateral)
+}
+
+/// Calculate collateral for LP withdrawal (round DOWN - user gets less)
 pub fn calculate_withdrawal_amount(
-    shares_to_burn: u256, total_shares: u256, total_collateral: u256,
+    shares: u256, total_shares: u256, total_collateral: u256,
 ) -> u256 {
     if total_shares == 0 {
         return 0;
     }
-    // amount = (shares * total_collateral) / total_shares
-    // Round DOWN - user receives less
-    mul_div_down(shares_to_burn, total_collateral, total_shares)
+    mul_div_down(shares, total_collateral, total_shares)
 }
 
-/// Calculate required collateral for a swap
-/// Rounds UP - user must post more collateral (protocol favored)
-pub fn calculate_required_collateral(max_exposure: u256, liquidation_threshold_bps: u256) -> u256 {
-    if max_exposure == 0 {
-        return 0;
-    }
-    // required = (max_exposure * BPS) / threshold
-    // Round UP - user posts more
-    mul_div_up(max_exposure, Constants::BPS, liquidation_threshold_bps)
-}
-
-/// Calculate fee amount
-/// Rounds UP - user pays more fees (protocol favored)
-pub fn calculate_fee(base_amount: u256, fee_bps: u256) -> u256 {
-    if fee_bps == 0 {
-        return 0;
-    }
-    // fee = (amount * fee_bps) / BPS
-    // Round UP - more fees collected
-    mul_div_up(base_amount, fee_bps, Constants::BPS)
-}
-
-/// Calculate payment amount (for fixed or floating leg)
-/// Rounds DOWN for profit scenarios, UP for loss scenarios
-/// This is a neutral calculation - caller decides context
-pub fn calculate_payment(
-    notional: u256, rate_bps: u256, term_seconds: u256, seconds_per_year: u256,
-) -> u256 {
-    // payment = notional * rate * term / year / BPS
-    // Use mul_div_down as base calculation
-    mul_div_down(mul_div_down(notional, rate_bps, Constants::BPS), term_seconds, seconds_per_year)
-}
-
-/// Calculate profit payout to user
-/// Rounds DOWN - user receives less profit (protocol favored)
-pub fn calculate_profit_payout(floating_payment: u256, fixed_payment: u256) -> u256 {
-    if floating_payment > fixed_payment {
-        floating_payment - fixed_payment
-    } else {
-        0
-    }
-}
-
-/// Calculate loss to deduct from user
-/// Rounds UP - user loses more (protocol favored)
-pub fn calculate_loss_deduction(fixed_payment: u256, floating_payment: u256) -> u256 {
-    if fixed_payment > floating_payment {
-        // Add 1 to round up the loss
-        let base_loss = fixed_payment - floating_payment;
-        base_loss + 1 // Round UP
-    } else {
-        0
-    }
-}
-
-/// Calculate liquidation bonus for liquidator
-/// Rounds DOWN - liquidator receives less (prevents over-extraction)
-pub fn calculate_liquidation_bonus(collateral_seized: u256, bonus_bps: u256) -> u256 {
-    // bonus = (collateral * bonus_bps) / BPS
-    // Round DOWN - liquidator gets less
-    mul_div_down(collateral_seized, bonus_bps, Constants::BPS)
-}
-
-/// Calculate health factor
-/// Rounds DOWN - makes liquidation trigger sooner (protocol favored)
-pub fn calculate_health_factor(remaining_value: u256, required_collateral: u256) -> u256 {
-    if required_collateral == 0 {
-        return Constants::BPS; // 100% health if no requirement
-    }
-    // health = (remaining * BPS) / required
-    // Round DOWN - health appears lower, liquidation triggers earlier
-    mul_div_down(remaining_value, Constants::BPS, required_collateral)
-}
-
-/// Calculate utilization fee (exponential curve)
-/// Rounds UP - user pays more fees (protocol favored)
-pub fn calculate_utilization_fee(
-    notional_amount: u256, available_liquidity: u256, min_fee_bps: u256, max_fee_bps: u256,
-) -> u256 {
-    if available_liquidity == 0 {
-        return max_fee_bps;
-    }
-
-    // utilization = notional / available (in BPS)
-    let utilization = mul_div_up(notional_amount, Constants::BPS, available_liquidity);
-
-    // Exponential curve: fee = min + (max - min) × util²
-    let fee_range = max_fee_bps - min_fee_bps;
-    let util_squared = mul_div_up(utilization, utilization, Constants::BPS);
-
-    // Round UP - user pays more
-    min_fee_bps + mul_div_up(fee_range, util_squared, Constants::BPS)
-}
-
-
-/// Normalize token amount to 18 decimals
-/// Rounds DOWN for consistency
-pub fn normalize_to_18_decimals(amount: u256, token_decimals: u8) -> u256 {
-    if token_decimals < 18 {
-        amount * pow10((18 - token_decimals).into())
-    } else if token_decimals > 18 {
-        div_down(amount, pow10((token_decimals - 18).into()))
-    } else {
-        amount
-    }
-}
-
-/// Convert from 18 decimals to token decimals
-/// Rounds based on direction parameter
-pub fn denormalize_from_18_decimals(amount_18: u256, token_decimals: u8, round_up: bool) -> u256 {
-    if token_decimals < 18 {
-        let divisor = pow10((18 - token_decimals).into());
-        if round_up {
-            div_up(amount_18, divisor)
-        } else {
-            div_down(amount_18, divisor)
-        }
-    } else if token_decimals > 18 {
-        amount_18 * pow10((token_decimals - 18).into())
-    } else {
-        amount_18
-    }
-}
-
-/// Convert token amount to USD value
-/// Rounds DOWN - value appears lower (conservative for collateral valuation)
-pub fn calculate_usd_value(
-    token_amount: u256, price: u256, // 8 decimals
-    token_decimals: u8,
-) -> u256 {
-    // Normalize to 18 decimals
-    let normalized = normalize_to_18_decimals(token_amount, token_decimals);
-
-    // value = (amount * price) / 10^8
-    // Round DOWN - collateral value is lower, more conservative
-    mul_div_down(normalized, price, Constants::PRICE_PRECISION)
-}
-
-/// Convert USD value to token amount
-/// Rounds UP - user needs more tokens (protocol favored)
-pub fn calculate_token_amount_from_usd(
-    usd_value: u256, // 18 decimals
-    price: u256, // 8 decimals
-    token_decimals: u8,
-) -> u256 {
-    if price == 0 {
-        return 0;
-    }
-
-    // amount_18 = (usd * 10^8) / price
-    // Round UP - user needs more tokens
-    let amount_18 = mul_div_up(usd_value, Constants::PRICE_PRECISION, price);
-
-    // Convert from 18 decimals to token decimals, round UP
-    denormalize_from_18_decimals(amount_18, token_decimals, true)
+/// Calculate fee amount (round UP - protocol gets more)
+pub fn calculate_fee(amount: u256, fee_bps: u256) -> u256 {
+    mul_div_up(amount, fee_bps, Constants::BPS)
 }

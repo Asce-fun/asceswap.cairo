@@ -53,8 +53,8 @@ pub mod AccessRgistry {
     /// @notice Initializer function required during for initial deployment of contract.
     /// @param superAdmin
     #[constructor]
-    fn constructor(ref self: ContractState, superAdmin: ContractAddress) {
-        self.initialize(superAdmin);
+    fn constructor(ref self: ContractState, admin: ContractAddress) {
+        self.initialize(admin);
     }
 
     ////////////////////////////////
@@ -89,6 +89,12 @@ pub mod AccessRgistry {
         fn set_role_admin(ref self: ContractState, role: felt252, admin_role: felt252) {
             self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
             self.accessControl.set_role_admin(role, admin_role);
+        }
+
+        fn set_role_from_admin(ref self: ContractState, role: felt252, owner: ContractAddress) {
+            self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
+            self.accessControl._grant_role(role, owner);
+            self.accessControl.set_role_admin(role, role);
         }
     }
 }
