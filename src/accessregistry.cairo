@@ -1,5 +1,5 @@
 #[starknet::contract]
-pub mod AccessRgistry {
+pub mod AccessRegistry {
     use openzeppelin::access::accesscontrol::accesscontrol::AccessControlComponent;
 
     // access control
