@@ -3,4 +3,5 @@ target
 snfoundry_trace/
 coverage/
 profile/
-test.cairo
+REFACTORING_PROPOSAL.md
+.claude
