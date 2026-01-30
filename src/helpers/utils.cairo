@@ -130,3 +130,72 @@ pub fn max_u64(a: u64, b: u64) -> u64 {
     }
 }
 
+#[cfg(tests)]
+pub mod tests {
+    use super::*;
+
+    #[test]
+    fn test_min_basic() {
+        assert(min(5, 10) == 5, 'min 5');
+        assert(min(10, 5) == 5, 'min reversed');
+        assert(min(5, 5) == 5, 'min equal');
+    }
+
+    #[test]
+    fn test_max_basic() {
+        assert(max(5, 10) == 10, 'max 10');
+        assert(max(10, 5) == 10, 'max reversed');
+        assert(max(5, 5) == 5, 'max equal');
+    }
+
+    #[test]
+    fn test_abs_diff() {
+        assert(abs_diff(10, 3) == 7, 'diff 7');
+        assert(abs_diff(3, 10) == 7, 'diff reversed');
+        assert(abs_diff(5, 5) == 0, 'diff equal');
+    }
+
+    #[test]
+    fn test_is_within_tolerance_true() {
+        // 100 within 5% of 100
+        assert(is_within_tolerance(100, 100, 500) == true, 'exact match');
+        // 105 within 5% of 100
+        assert(is_within_tolerance(105, 100, 500) == true, 'upper bound');
+        // 95 within 5% of 100
+        assert(is_within_tolerance(95, 100, 500) == true, 'lower bound');
+    }
+
+    #[test]
+    fn test_is_within_tolerance_false() {
+        // 110 NOT within 5% of 100
+        assert(is_within_tolerance(110, 100, 500) == false, 'outside upper');
+        // 90 NOT within 5% of 100
+        assert(is_within_tolerance(90, 100, 500) == false, 'outside lower');
+    }
+
+    #[test]
+    fn test_clamp_in_range() {
+        assert(clamp(50, 0, 100) == 50, 'in range');
+    }
+
+    #[test]
+    fn test_clamp_below_min() {
+        assert(clamp(0, 10, 100) == 10, 'below min');
+    }
+
+    #[test]
+    fn test_clamp_above_max() {
+        assert(clamp(150, 0, 100) == 100, 'above max');
+    }
+
+    #[test]
+    fn test_min_u64() {
+        assert(min_u64(5_u64, 10_u64) == 5_u64, 'min_u64');
+    }
+
+    #[test]
+    fn test_max_u64() {
+        assert(max_u64(5_u64, 10_u64) == 10_u64, 'max_u64');
+    }
+}
+
