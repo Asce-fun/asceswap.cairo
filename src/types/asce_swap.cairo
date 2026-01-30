@@ -16,13 +16,6 @@ pub enum SwapStatus {
     ExitedEarly,
 }
 
-// #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
-// pub enum LiquidationSide {
-//     #[default]
-//     Buyer,
-//     Lp,
-// }
-
 #[derive(Drop, Copy, Serde, starknet::Store, PartialEq, Debug)]
 pub enum MarketStatus {
     Active,
