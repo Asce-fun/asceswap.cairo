@@ -86,3 +86,113 @@ pub fn calculate_withdrawal_amount(
 pub fn calculate_fee(amount: u256, fee_bps: u256) -> u256 {
     mul_div_up(amount, fee_bps, Constants::BPS)
 }
+
+#[cfg(tests)]
+pub mod tests {
+    #[test]
+    fn test_calculate_payment_basic() {
+        // 1000 notional, 500 bps (5%), 1 year = 50
+        let payment = calculate_payment(1000, 500, 31536000);
+        assert(payment == 50, 'payment 50');
+    }
+
+    #[test]
+    fn test_calculate_payment_half_year() {
+        // 1000 notional, 500 bps (5%), 6 months = 25
+        let payment = calculate_payment(1000, 500, 15768000);
+        assert(payment == 25, 'payment 25');
+    }
+
+    #[test]
+    fn test_calculate_payment_30_days() {
+        // 1000000 notional, 500 bps (5%), 30 days
+        let payment = calculate_payment(1000000, 500, 2592000);
+        assert(payment == 4109, 'payment 30 days');
+    }
+
+    #[test]
+    fn test_calculate_payment_zero_rate() {
+        let payment = calculate_payment(1000000, 0, 2592000);
+        assert(payment == 0, 'zero rate');
+    }
+
+    #[test]
+    fn test_calculate_required_margin() {
+        let max_exposure = calculate_max_exposure(1000000, 500, 2592000);
+        let margin = calculate_required_margin(1000000, 500, 2592000, 12000);
+        let expected = mul_div_up(max_exposure, 12000, 10000);
+        assert(margin == expected, 'margin calc');
+    }
+
+    #[test]
+    fn test_time_adjusted_margin_full() {
+        let margin = calculate_time_adjusted_margin(1000, 2592000, 2592000, 2000);
+        assert(margin == 1000, 'full margin');
+    }
+
+    #[test]
+    fn test_time_adjusted_margin_half() {
+        let margin = calculate_time_adjusted_margin(1000, 1296000, 2592000, 0);
+        assert(margin == 500, 'half margin');
+    }
+
+    #[test]
+    fn test_time_adjusted_margin_floor() {
+        let margin = calculate_time_adjusted_margin(1000, 259200, 2592000, 2000);
+        assert(margin == 200, 'floor applies');
+    }
+
+    #[test]
+    fn test_health_factor_healthy() {
+        // remaining=1000, required=800 -> health = 12500 (125%)
+        let health = calculate_health_factor(1000, 800);
+        assert(health == 12500, 'health 125%');
+    }
+
+    #[test]
+    fn test_health_factor_at_threshold() {
+        // remaining=800, required=1000 -> health = 8000 (80%)
+        let health = calculate_health_factor(800, 1000);
+        assert(health == 8000, 'health 80%');
+    }
+
+    #[test]
+    fn test_health_factor_zero_margin() {
+        let health = calculate_health_factor(1000, 0);
+        assert(health == 10000, '100% health');
+    }
+
+    #[test]
+    fn test_shares_to_mint_first() {
+        let shares = calculate_shares_to_mint(1000, 0, 0);
+        assert(shares == 1000, 'first deposit');
+    }
+
+    #[test]
+    fn test_shares_to_mint_proportional() {
+        // 1000 shares, 2000 collateral, deposit 1000 -> 500 shares
+        let shares = calculate_shares_to_mint(1000, 1000, 2000);
+        assert(shares == 500, 'proportional');
+    }
+
+    #[test]
+    fn test_withdrawal_amount() {
+        // 500 shares / 1000 total, 2000 collateral -> 1000
+        let amount = calculate_withdrawal_amount(500, 1000, 2000);
+        assert(amount == 1000, 'withdrawal');
+    }
+
+    #[test]
+    fn test_calculate_fee_basic() {
+        // 1000 * 50 bps = 5
+        let fee = calculate_fee(1000, 50);
+        assert(fee == 5, 'fee 5');
+    }
+
+    #[test]
+    fn test_calculate_fee_rounds_up() {
+        // 999 * 50 / 10000 = 4.995 -> 5
+        let fee = calculate_fee(999, 50);
+        assert(fee == 5, 'fee rounds up');
+    }
+}
