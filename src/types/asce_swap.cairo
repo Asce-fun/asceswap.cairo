@@ -177,6 +177,25 @@ pub struct PoolAnalytics {
     pub utilization_fixed_bps: u256,
     pub utilization_floating_bps: u256,
     pub net_exposure_notional: SignedValue,
-    // pub insurance_fund_value: u256,
+}
+
+/// Settlement type for swap closure
+#[derive(Drop, Copy, Serde, PartialEq)]
+pub enum SettlementType {
+    #[default]
+    Normal, // settle_swap at expiration
+    EarlyExit, // early_exit with penalty
+    Liquidation // liquidate with bonus
+}
+
+/// Result of a settlement operation
+#[derive(Drop, Copy, Serde)]
+pub struct SettlementResult {
+    pub buyer_payout: u256,
+    pub lp_delta: SignedValue,
+    pub liquidator_bonus: u256, // 0 for non-liquidation
+    pub penalty: u256, // 0 for non-early-exit
+    pub twa_rate_bps: u256,
+    pub pnl: SignedValue,
 }
 
