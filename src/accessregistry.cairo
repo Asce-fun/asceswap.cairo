@@ -1,18 +1,11 @@
 #[starknet::contract]
 pub mod AccessRegistry {
     use openzeppelin::access::accesscontrol::accesscontrol::AccessControlComponent;
-
-    // access control
-    use openzeppelin::interfaces::accesscontrol::{
-        IAccessControlDispatcher, IAccessControlDispatcherTrait,
-    };
-
-    // Upgradable
     use openzeppelin::interfaces::upgrades::IUpgradeable;
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin_upgrades::UpgradeableComponent;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::{ClassHash, ContractAddress, get_caller_address};
+    use starknet::{ClassHash, ContractAddress};
     use crate::helpers::roles::Roles;
     use crate::interfaces::access_registry::IAccessExtra;
 
