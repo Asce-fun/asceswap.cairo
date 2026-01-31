@@ -1,0 +1,24 @@
+{
+  "network": "https://starknet-sepolia.infura.io/v3/44bdf2d1c8594cc9b16832398af754d7",
+  "timestamp": "2026-01-31T08:16:21.411Z",
+  "deployer": "0x02c402cda5fa6c196c87B2282F92CAcF1194e353a279ed9a82141AB2F6262f7A",
+  
+  
+  
+  "contracts": {
+    "accessRegistry": "0x6671856d65b55ad89bf7f1187a1369f630800838fd24fb6c113b51c24e77c05",
+    "mockOracle": "0x1862a097d0da018891c6aca66e3d17a885a1d5af243c0bcbcdf0496898789e8",
+    "mockERC20": "0x6f0d7ae007d5c91f0b91c422f42f1c7000b8fb25eb1dc2c1a92c448fcb073ce",
+    "asceswap": "0x4869016a4869c087e2842d5dec4c1453dc25389ef5d3576e6adb35b5b186f24"
+  },
+ 
+ 
+ 
+ 
+  "market": {
+    "pairId": "1",
+    "oracle": "0x1862a097d0da018891c6aca66e3d17a885a1d5af243c0bcbcdf0496898789e8",
+    "collateralToken": "0x6f0d7ae007d5c91f0b91c422f42f1c7000b8fb25eb1dc2c1a92c448fcb073ce",
+    "curator": "0x02c402cda5fa6c196c87B2282F92CAcF1194e353a279ed9a82141AB2F6262f7A"
+  }
+}
