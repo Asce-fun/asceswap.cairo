@@ -21,6 +21,7 @@ assert_macros = "2.15.1"
 
 [[target.starknet-contract]]
 sierra = true
+casm = true  # Required for deployment (generates .compiled_contract_class.json files)
 
 [scripts]
 test = "snforge test"
