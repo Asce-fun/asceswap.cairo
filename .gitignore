@@ -5,3 +5,6 @@ coverage/
 profile/
 REFACTORING_PROPOSAL.md
 .claude
+deploy/node_modules
+deploy/.env
+deploy/.claude
