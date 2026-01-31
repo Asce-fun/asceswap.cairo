@@ -25,3 +25,6 @@ pub mod helpers {
 pub mod accessregistry;
 
 pub mod asceswap;
+
+// Mock contracts for testnet/mainnet fork testing
+pub mod mocks;
