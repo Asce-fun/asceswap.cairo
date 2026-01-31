@@ -1,5 +1,9 @@
 pub mod components {
+    pub mod LiquidityManager;
+    pub mod MarketManager;
     pub mod Security;
+    pub mod SettlementEngine;
+    pub mod SwapManager;
 }
 
 pub mod interfaces {
@@ -13,6 +17,7 @@ pub mod interfaces {
 pub mod types {
     pub mod asce_swap;
 }
+
 pub mod helpers {
     pub mod constants;
     pub mod core_utils;
@@ -22,6 +27,13 @@ pub mod helpers {
     pub mod signed_value;
     pub mod utils;
 }
+
+pub mod libraries {
+    pub mod health_calculator;
+    pub mod pool_accounting;
+    pub mod rate_engine;
+}
+
 pub mod accessregistry;
 
 pub mod asceswap;
