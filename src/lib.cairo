@@ -2,7 +2,6 @@ pub mod components {
     pub mod LiquidityManager;
     pub mod MarketManager;
     pub mod Security;
-    pub mod SettlementEngine;
     pub mod SwapManager;
 }
 
@@ -20,7 +19,6 @@ pub mod types {
 
 pub mod helpers {
     pub mod constants;
-    pub mod core_utils;
     pub mod errors;
     pub mod fixed_point;
     pub mod roles;
@@ -32,6 +30,7 @@ pub mod libraries {
     pub mod health_calculator;
     pub mod pool_accounting;
     pub mod rate_engine;
+    pub mod settlement_engine;
 }
 
 pub mod accessregistry;
