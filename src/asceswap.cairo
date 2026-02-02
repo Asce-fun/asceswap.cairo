@@ -159,8 +159,6 @@ pub mod Asceswap {
 
     #[abi(embed_v0)]
     impl AsceSwapImpl of IAsceSwap<ContractState> {
-        // ==================== MARKET OPERATIONS ====================
-
         fn create_market_pair(
             ref self: ContractState,
             rate_oracle: ContractAddress,
@@ -172,43 +170,16 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
+            self._validate_permission_call();
+
             // Validations
             assert(!rate_oracle.is_zero(), Errors::ZERO_ADDRESS);
             assert(!collateral_token.is_zero(), Errors::ZERO_ADDRESS);
             assert(!curator.is_zero(), Errors::ZERO_ADDRESS);
 
-            self.market_manager.validate_market_params(@params);
-            self._validate_permission_call();
-
-            // Get oracle rate
-            let (initial_rate, rate_timestamp) = self.market_manager.get_oracle_rate(rate_oracle);
-            let current_time = get_block_timestamp();
-
-            assert(
-                current_time - rate_timestamp <= params.max_oracle_staleness_seconds,
-                Errors::ORACLE_STALE,
-            );
-            assert(
-                initial_rate >= params.min_rate_bps && initial_rate <= params.max_rate_bps,
-                Errors::RATE_OUT_OF_BOUNDS,
-            );
-
-            // Get token decimals
-            let token = IERC20Dispatcher { contract_address: collateral_token };
-            let decimals = token.decimals();
-
-            // Create market via component
             let pair_id = self
                 .market_manager
-                .create_market_pair(
-                    rate_oracle,
-                    collateral_token,
-                    curator,
-                    params,
-                    initial_rate,
-                    current_time,
-                    decimals,
-                );
+                ._create_market_pair(rate_oracle, collateral_token, curator, params);
 
             // Handle LP permissioning
             if params.is_lp_permissioned {
@@ -224,21 +195,21 @@ pub mod Asceswap {
 
         fn pause_market(ref self: ContractState, pair_id: felt252) {
             self.security.assert_admin_role();
-            self.market_manager.pause_market(pair_id);
+            self.market_manager._pause_market(pair_id);
         }
 
         fn unpause_market(ref self: ContractState, pair_id: felt252) {
             self.security.assert_admin_role();
-            self.market_manager.unpause_market(pair_id);
+            self.market_manager._unpause_market(pair_id);
         }
 
-        // ==================== LP OPERATIONS ====================
+        //LP OPERATIONS
 
         fn supply_lp_collateral(ref self: ContractState, pair_id: felt252, amount: u256) -> u256 {
             self.reentrancy.start();
             self._assert_not_paused();
 
-            let market = self.market_manager.get_market(pair_id);
+            let market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
 
             self._validate_lp_call(pair_id, market.params.is_lp_permissioned);
@@ -248,14 +219,14 @@ pub mod Asceswap {
 
             let (shares, updated_pool) = self
                 .liquidity_manager
-                .supply_lp_collateral(
+                ._supply_lp_collateral(
                     pair_id, amount, caller, market.pool, @config, market.collateral_token,
                 );
 
             // Update market with new pool state
             let mut updated_market = market;
             updated_market.pool = updated_pool;
-            self.market_manager.write_market(pair_id, updated_market);
+            self.market_manager._write_market(pair_id, updated_market);
 
             self.reentrancy.end();
             shares
@@ -265,27 +236,27 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
-            let market = self.market_manager.get_market(pair_id);
+            let market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
 
             let caller = get_caller_address();
 
             let (amount, updated_pool) = self
                 .liquidity_manager
-                .withdraw_lp_collateral(
+                ._withdraw_lp_collateral(
                     pair_id, shares, caller, market.pool, market.collateral_token,
                 );
 
             // Update market with new pool state
             let mut updated_market = market;
             updated_market.pool = updated_pool;
-            self.market_manager.write_market(pair_id, updated_market);
+            self.market_manager._write_market(pair_id, updated_market);
 
             self.reentrancy.end();
             amount
         }
 
-        // ==================== SWAP OPERATIONS ====================
+        //SWAP OPERATIONS
 
         fn buy_swap(
             ref self: ContractState,
@@ -298,14 +269,14 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
-            let mut market = self.market_manager.get_market(pair_id);
+            let mut market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
 
             let caller = get_caller_address();
             let current_time = get_block_timestamp();
 
             // Update rate index
-            let oracle_rate = self.market_manager.update_rate_index(ref market, current_time);
+            let oracle_rate = self.market_manager._update_rate_index(ref market, current_time);
 
             // Emit rate update event
             self
@@ -353,7 +324,7 @@ pub mod Asceswap {
             market.pool = updated_pool;
             market.total_swaps_created = market.total_swaps_created + 1;
             market.active_swap_count = market.active_swap_count + 1;
-            self.market_manager.write_market(pair_id, market);
+            self.market_manager._write_market(pair_id, market);
 
             self.reentrancy.end();
             swap_id
@@ -363,16 +334,20 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
+            // Read swap once here
             let swap = self.swap_manager.get_swap(swap_id);
-            let mut market = self.market_manager.get_market(swap.pair_id);
+            let pair_id = swap.pair_id; // extract before move
+            let mut market = self.market_manager._get_market(pair_id);
             let owner = self.erc721.owner_of(swap_id);
             let current_time = get_block_timestamp();
 
             // Update rate index
-            self.market_manager.update_rate_index(ref market, current_time);
+            self.market_manager._update_rate_index(ref market, current_time);
 
-            // Settle via component
-            let (updated_pool, result) = self.swap_manager.settle_swap(swap_id, owner, @market);
+            //call settlement for swap
+            let (updated_pool, result) = self
+                .swap_manager
+                .settle_swap(swap_id, swap, owner, @market);
 
             // Burn NFT
             self.erc721.burn(swap_id);
@@ -387,7 +362,7 @@ pub mod Asceswap {
             // Update market state
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
-            self.market_manager.write_market(swap.pair_id, market);
+            self.market_manager._write_market(pair_id, market);
 
             self.reentrancy.end();
         }
@@ -396,19 +371,21 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
+            // Read swap once here (component won't read again)
             let swap = self.swap_manager.get_swap(swap_id);
-            let mut market = self.market_manager.get_market(swap.pair_id);
+            let pair_id = swap.pair_id; // extract before move
+            let mut market = self.market_manager._get_market(pair_id);
             let caller = get_caller_address();
             let owner = self.erc721.owner_of(swap_id);
             let current_time = get_block_timestamp();
 
             // Update rate index
-            self.market_manager.update_rate_index(ref market, current_time);
+            self.market_manager._update_rate_index(ref market, current_time);
 
-            // Early exit via component
+            // Early exit via component (pass swap by value - saves 1 storage read)
             let (updated_pool, result) = self
                 .swap_manager
-                .early_exit(swap_id, caller, owner, @market);
+                .early_exit(swap_id, swap, caller, owner, @market);
 
             // Burn NFT
             self.erc721.burn(swap_id);
@@ -423,7 +400,7 @@ pub mod Asceswap {
             // Update market state
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
-            self.market_manager.write_market(swap.pair_id, market);
+            self.market_manager._write_market(pair_id, market);
 
             self.reentrancy.end();
         }
@@ -432,19 +409,21 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
+            // Read swap once here (component won't read again)
             let swap = self.swap_manager.get_swap(swap_id);
-            let mut market = self.market_manager.get_market(swap.pair_id);
+            let pair_id = swap.pair_id; // extract before move
+            let mut market = self.market_manager._get_market(pair_id);
             let liquidator = get_caller_address();
             let owner = self.erc721.owner_of(swap_id);
             let current_time = get_block_timestamp();
 
             // Update rate index
-            self.market_manager.update_rate_index(ref market, current_time);
+            self.market_manager._update_rate_index(ref market, current_time);
 
-            // Liquidate via component
+            // Liquidate via component (pass swap by value - saves 1 storage read)
             let (updated_pool, result, _health_status) = self
                 .swap_manager
-                .liquidate(swap_id, liquidator, owner, @market);
+                .liquidate(swap_id, swap, liquidator, owner, @market);
 
             // Burn NFT
             self.erc721.burn(swap_id);
@@ -459,15 +438,13 @@ pub mod Asceswap {
             // Update market state
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
-            self.market_manager.write_market(swap.pair_id, market);
+            self.market_manager._write_market(pair_id, market);
 
             self.reentrancy.end();
         }
 
-        // ==================== VIEW FUNCTIONS ====================
-
         fn get_market(self: @ContractState, pair_id: felt252) -> MarketPair {
-            self.market_manager.get_market(pair_id)
+            self.market_manager._get_market(pair_id)
         }
 
         fn get_swap(self: @ContractState, swap_id: u256) -> Swap {
@@ -477,8 +454,8 @@ pub mod Asceswap {
         fn get_swap_quote(
             self: @ContractState, pair_id: felt252, side: SwapSide, notional: u256,
         ) -> SwapQuote {
-            let market = self.market_manager.get_market(pair_id);
-            let (oracle_rate, _) = self.market_manager.get_oracle_rate(market.rate_oracle);
+            let market = self.market_manager._get_market(pair_id);
+            let (oracle_rate, _) = self.market_manager._get_oracle_rate(market.rate_oracle);
             self
                 .swap_manager
                 .get_swap_quote(@market.pool, @market.params, side, notional, oracle_rate)
@@ -486,24 +463,24 @@ pub mod Asceswap {
 
         fn get_health_status(self: @ContractState, swap_id: u256) -> HealthStatus {
             let swap = self.swap_manager.get_swap(swap_id);
-            let market = self.market_manager.get_market(swap.pair_id);
+            let market = self.market_manager._get_market(swap.pair_id);
             self.swap_manager.get_health_status(swap_id, @market)
         }
 
         fn get_lp_position(
             self: @ContractState, lp: ContractAddress, pair_id: felt252,
         ) -> LpPosition {
-            self.liquidity_manager.get_lp_position(lp, pair_id)
+            self.liquidity_manager._get_lp_position(lp, pair_id)
         }
 
         fn get_pool_analytics(self: @ContractState, pair_id: felt252) -> PoolAnalytics {
-            let market = self.market_manager.get_market(pair_id);
-            self.liquidity_manager.get_pool_analytics(@market.pool)
+            let market = self.market_manager._get_market(pair_id);
+            self.liquidity_manager._get_pool_analytics(@market.pool)
         }
 
         fn get_current_twa(self: @ContractState, swap_id: u256) -> u256 {
             let swap = self.swap_manager.get_swap(swap_id);
-            let market = self.market_manager.get_market(swap.pair_id);
+            let market = self.market_manager._get_market(swap.pair_id);
             self.swap_manager.get_current_twa(swap_id, @market.rate_index)
         }
 
@@ -515,12 +492,51 @@ pub mod Asceswap {
             self.swap_manager.get_next_swap_id()
         }
 
-        // ==================== ADMIN FUNCTIONS ====================
-
         fn set_premission_less_flag(ref self: ContractState, flag: bool) {
             self.security.assert_admin_role();
             self.permissioned_flag.write(flag);
             self.emit(FlagSetted { flag });
+        }
+
+
+        fn exchange_rate_for_lp(self: @ContractState, pair_id: felt252) -> u256 {
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            self.liquidity_manager._exchange_rate(@market.pool)
+        }
+
+        fn convert_to_shares_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            self.liquidity_manager._convert_to_shares(assets, @market.pool)
+        }
+
+        fn convert_to_assets_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            self.liquidity_manager._convert_to_assets(assets, @market.pool)
+        }
+
+        fn preview_deposit_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            let config = self.protocol_config.read();
+            self.liquidity_manager._preview_deposit(assets, @market.pool, @config)
+        }
+
+        fn preview_withdraw_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            self.liquidity_manager._preview_withdraw(assets, @market.pool)
+        }
+
+        /// Check if cooldown period has passed for an LP
+        fn is_cooldown_met(self: @ContractState, lp: ContractAddress, pair_id: felt252) -> bool {
+            self.liquidity_manager._is_cooldown_met(lp, pair_id)
+        }
+        /// Get LP's share balance
+        fn balance_of_lp(self: @ContractState, lp: ContractAddress, pair_id: felt252) -> u256 {
+            self.liquidity_manager._balance_of(lp, pair_id)
         }
 
         fn update_protocol_config(ref self: ContractState, config: ProtocolConfig) {
@@ -558,8 +574,6 @@ pub mod Asceswap {
             self.emit(ProtocolFeesWithdrawn { token, amount, recipient });
         }
     }
-
-    // ==================== INTERNAL FUNCTIONS ====================
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {

@@ -69,8 +69,20 @@ pub trait IAsceSwap<TContractState> {
         self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256,
     ) -> SwapQuote;
 
+    fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
+
+    fn is_cooldown_met(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> bool;
+
     /// Get health status of a swap
     fn get_health_status(self: @TContractState, swap_id: u256) -> HealthStatus;
+
+    fn exchange_rate_for_lp(self: @TContractState, pair_id: felt252) -> u256;
+    fn convert_to_shares_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
+    fn convert_to_assets_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
+
+
+    fn preview_deposit_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
+    fn preview_withdraw_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
 
     /// Get LP position
     fn get_lp_position(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> LpPosition;
