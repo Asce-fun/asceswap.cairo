@@ -1,13 +1,14 @@
 #[starknet::component]
 pub mod MarketManagerComponent {
-    use starknet::ContractAddress;
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
+    use starknet::{ContractAddress, get_block_timestamp};
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
     use crate::helpers::fixed_point::mul_div_up;
+    use crate::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use crate::interfaces::rate_oracle::{IOracleAdapterDispatcher, IOracleAdapterDispatcherTrait};
     use crate::types::asce_swap::{LpPool, MarketPair, MarketParams, MarketStatus, RateIndex};
 
@@ -31,18 +32,23 @@ pub mod MarketManagerComponent {
         pub pair_id: felt252,
         pub rate_oracle: ContractAddress,
         pub collateral_token: ContractAddress,
+        pub curator: ContractAddress,
+        pub swap_term_seconds: u64,
+        pub timestamp: u64,
     }
 
     #[derive(Drop, starknet::Event)]
     pub struct MarketPaused {
         #[key]
         pub pair_id: felt252,
+        pub timestamp: u64,
     }
 
     #[derive(Drop, starknet::Event)]
     pub struct MarketUnpaused {
         #[key]
         pub pair_id: felt252,
+        pub timestamp: u64,
     }
 
     #[generate_trait]
@@ -55,16 +61,32 @@ pub mod MarketManagerComponent {
         }
 
         /// Create a new market pair
-        fn create_market_pair(
+        fn _create_market_pair(
             ref self: ComponentState<TContractState>,
             rate_oracle: ContractAddress,
             collateral_token: ContractAddress,
             curator: ContractAddress,
             params: MarketParams,
-            initial_rate: u256,
-            current_time: u64,
-            decimals: u8,
         ) -> felt252 {
+            self._validate_market_params(@params);
+
+            // Get oracle rate
+            let (initial_rate, rate_timestamp) = self._get_oracle_rate(rate_oracle);
+            let current_time = get_block_timestamp();
+
+            assert(
+                current_time - rate_timestamp <= params.max_oracle_staleness_seconds,
+                Errors::ORACLE_STALE,
+            );
+            assert(
+                initial_rate >= params.min_rate_bps && initial_rate <= params.max_rate_bps,
+                Errors::RATE_OUT_OF_BOUNDS,
+            );
+
+            /// Get token decimals
+            let token = IERC20Dispatcher { contract_address: collateral_token };
+            let decimals = token.decimals();
+
             let pair_id = self.next_pair_id.read();
             self.next_pair_id.write(pair_id + 1);
 
@@ -93,43 +115,53 @@ pub mod MarketManagerComponent {
             };
 
             self.markets.write(pair_id, market);
-            self.emit(MarketPairCreated { pair_id, rate_oracle, collateral_token });
+            self
+                .emit(
+                    MarketPairCreated {
+                        pair_id,
+                        rate_oracle,
+                        collateral_token,
+                        curator,
+                        swap_term_seconds: params.swap_term_seconds,
+                        timestamp: current_time,
+                    },
+                );
 
             pair_id
         }
 
         /// Pause a market
-        fn pause_market(ref self: ComponentState<TContractState>, pair_id: felt252) {
+        fn _pause_market(ref self: ComponentState<TContractState>, pair_id: felt252) {
             let mut market = self.markets.read(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
             market.status = MarketStatus::Paused;
             self.markets.write(pair_id, market);
-            self.emit(MarketPaused { pair_id });
+            self.emit(MarketPaused { pair_id, timestamp: get_block_timestamp() });
         }
 
         /// Unpause a market
-        fn unpause_market(ref self: ComponentState<TContractState>, pair_id: felt252) {
+        fn _unpause_market(ref self: ComponentState<TContractState>, pair_id: felt252) {
             let mut market = self.markets.read(pair_id);
             assert(market.status == MarketStatus::Paused, Errors::MARKET_NOT_ACTIVE);
             market.status = MarketStatus::Active;
             self.markets.write(pair_id, market);
-            self.emit(MarketUnpaused { pair_id });
+            self.emit(MarketUnpaused { pair_id, timestamp: get_block_timestamp() });
         }
 
         /// Get a market by pair_id
-        fn get_market(self: @ComponentState<TContractState>, pair_id: felt252) -> MarketPair {
+        fn _get_market(self: @ComponentState<TContractState>, pair_id: felt252) -> MarketPair {
             self.markets.read(pair_id)
         }
 
         /// Update market state (called by other components)
-        fn write_market(
+        fn _write_market(
             ref self: ComponentState<TContractState>, pair_id: felt252, market: MarketPair,
         ) {
             self.markets.write(pair_id, market);
         }
 
         /// Validate market parameters
-        fn validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
+        fn _validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
             assert(
                 *params.liquidation_threshold_bps >= Constants::MIN_LIQUIDATION_THRESHOLD_BPS
                     && *params
@@ -153,13 +185,15 @@ pub mod MarketManagerComponent {
             assert(*params.max_notional_per_swap >= *params.min_notional, Errors::INVALID_PARAMS);
             assert(*params.min_margin_floor_bps <= Constants::BPS, Errors::INVALID_PARAMS);
             assert(
-                *params.initial_margin_multiplier_bps >= Constants::MIN_MARGIN_MULTIPLIER_BPS,
+                *params.initial_margin_multiplier_bps >= Constants::MIN_MARGIN_MULTIPLIER_BPS
+                    && *params
+                        .initial_margin_multiplier_bps <= Constants::MAX_MARGIN_MULTIPLIER_BPS,
                 Errors::INVALID_PARAMS,
             );
         }
 
         /// Get oracle rate
-        fn get_oracle_rate(
+        fn _get_oracle_rate(
             self: @ComponentState<TContractState>, oracle: ContractAddress,
         ) -> (u256, u64) {
             let oracle_adapter = IOracleAdapterDispatcher { contract_address: oracle };
@@ -167,10 +201,10 @@ pub mod MarketManagerComponent {
         }
 
         /// Update rate index with latest oracle value
-        fn update_rate_index(
+        fn _update_rate_index(
             ref self: ComponentState<TContractState>, ref market: MarketPair, current_time: u64,
         ) -> u256 {
-            let (raw_rate, rate_timestamp) = self.get_oracle_rate(market.rate_oracle);
+            let (raw_rate, rate_timestamp) = self._get_oracle_rate(market.rate_oracle);
 
             // Check staleness
             assert(
