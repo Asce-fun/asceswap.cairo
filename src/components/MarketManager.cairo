@@ -220,7 +220,8 @@ pub mod MarketManagerComponent {
 
             let mut rate_index = market.rate_index;
 
-            // If first update, just initialize
+            // If first update, just initialize(although this condition should never trigger , since
+            // we are already intializing at market creation)
             if rate_index.last_update_time == 0 {
                 rate_index.last_update_time = current_time;
                 rate_index.last_rate_bps = raw_rate;
