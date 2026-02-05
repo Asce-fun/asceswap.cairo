@@ -1,7 +1,8 @@
 use starknet::ContractAddress;
 use crate::types::asce_swap::{
-    HealthStatus, LpPosition, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig, Swap,
-    SwapQuote, SwapSide,
+    HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
+    ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard, UserLpSummary,
+    UserSwapSummary,
 };
 
 #[starknet::interface]
@@ -98,4 +99,58 @@ pub trait IAsceSwap<TContractState> {
 
     /// Get next swap ID
     fn get_next_swap_id(self: @TContractState) -> u256;
+
+    // ============== Analytics Functions ==============
+
+    /// Get comprehensive swap analytics (for frontend dashboard)
+    fn get_swap_analytics(self: @TContractState, swap_id: u256) -> SwapAnalytics;
+
+    /// Get LP position analytics
+    fn get_lp_analytics(
+        self: @TContractState, lp: ContractAddress, pair_id: felt252,
+    ) -> LpAnalytics;
+
+    /// Preview PnL at different rate scenarios
+    /// Returns projected PnL if rate goes to each of the provided rates
+    fn preview_swap_scenarios(
+        self: @TContractState, swap_id: u256, rate_scenarios_bps: Span<u256>,
+    ) -> Span<ScenarioResult>;
+
+    /// Get breakeven rate for a swap (the rate at which PnL = 0)
+    fn get_breakeven_rate(self: @TContractState, swap_id: u256) -> u256;
+
+    // ============== User Dashboard Functions ==============
+
+    /// Get summary of multiple swaps (pass swap IDs from indexer/events)
+    fn get_user_swaps_summary(self: @TContractState, swap_ids: Span<u256>) -> Span<UserSwapSummary>;
+
+    /// Get aggregated dashboard stats from provided swap IDs and market IDs
+    fn get_user_dashboard(
+        self: @TContractState,
+        user: ContractAddress,
+        swap_ids: Span<u256>,
+        lp_pair_ids: Span<felt252>,
+    ) -> UserDashboard;
+
+    /// Get LP summary across multiple markets
+    fn get_user_lp_summary(
+        self: @TContractState, user: ContractAddress, pair_ids: Span<felt252>,
+    ) -> Span<UserLpSummary>;
+
+    // ============================================================
+    // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
+    // These use on-chain arrays which don't scale well.
+    // ============================================================
+
+    /// Get all swap IDs owned by a user
+    fn get_user_swap_ids(self: @TContractState, user: ContractAddress) -> Span<u256>;
+
+    /// Get all LP pair IDs where user has a position
+    fn get_user_lp_pair_ids(self: @TContractState, user: ContractAddress) -> Span<felt252>;
+
+    /// Get count of user's swaps
+    fn get_user_swap_count(self: @TContractState, user: ContractAddress) -> u32;
+
+    /// Get count of user's LP positions
+    fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
 }
