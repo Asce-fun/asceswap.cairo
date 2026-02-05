@@ -42,7 +42,7 @@ pub mod Constants {
 
     pub const MIN_LP_COOLDOWN_SECONDS: u64 = 3_600;
 
-    pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 12500; // 110%
+    pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 11000; // 110%
 
     pub const MAX_MARGIN_MULTIPLIER_BPS: u256 = 12500; //125%
 
