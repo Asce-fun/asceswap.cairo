@@ -7,6 +7,7 @@ pub mod components {
 
 pub mod interfaces {
     pub mod access_registry;
+    pub mod analytics;
     pub mod asce_swap;
     pub mod erc20;
     pub mod rate_oracle;
@@ -14,6 +15,7 @@ pub mod interfaces {
 }
 
 pub mod types {
+    pub mod analytics;
     pub mod asce_swap;
 }
 
@@ -34,5 +36,7 @@ pub mod libraries {
 }
 
 pub mod accessregistry;
+
+pub mod analytics;
 
 pub mod asceswap;
