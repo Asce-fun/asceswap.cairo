@@ -177,6 +177,123 @@ pub struct PoolAnalytics {
     pub utilization_fixed_bps: u256,
     pub utilization_floating_bps: u256,
     pub net_exposure_notional: SignedValue,
-    // pub insurance_fund_value: u256,
+}
+
+/// Settlement type for swap closure
+#[derive(Drop, Copy, Serde, PartialEq)]
+pub enum SettlementType {
+    #[default]
+    Normal, // settle_swap at expiration
+    EarlyExit, // early_exit with penalty
+    Liquidation // liquidate with bonus
+}
+
+/// Result of a settlement operation
+#[derive(Drop, Copy, Serde)]
+pub struct SettlementResult {
+    pub buyer_payout: u256,
+    pub lp_delta: SignedValue,
+    pub liquidator_bonus: u256, // 0 for non-liquidation
+    pub penalty: u256, // 0 for non-early-exit
+    pub twa_rate_bps: u256,
+    pub pnl: SignedValue,
+}
+
+// ============== Analytics Types ==============
+
+/// Comprehensive swap analytics for frontend display
+#[derive(Drop, Copy, Serde)]
+pub struct SwapAnalytics {
+    // Current state
+    pub current_pnl: SignedValue, // Current PnL in collateral units
+    pub current_floating_rate_bps: u256, // Current oracle rate
+    pub fixed_rate_bps: u256, // Locked fixed rate (profit threshold)
+    pub current_spread_bps: SignedValue, // floating - fixed (positive = in profit for Fixed side)
+    // Yield metrics
+    pub leverage_x100: u256, // Leverage ratio * 100 (e.g., 833 = 8.33x)
+    pub yield_term_bps: SignedValue, // Current yield for the term (annualized)
+    pub current_return: SignedValue, // Current $ return (same as current_pnl)
+    // Position info
+    pub notional: u256,
+    pub collateral: u256,
+    pub health_factor_bps: u256,
+    pub is_liquidatable: bool,
+    // Time info
+    pub elapsed_seconds: u64,
+    pub remaining_seconds: u64,
+    pub progress_bps: u256, // 0-10000 (0-100%)
+    // Projections at expiry (if rate stays same)
+    pub projected_pnl_at_expiry: SignedValue,
+}
+
+/// LP position analytics
+#[derive(Drop, Copy, Serde)]
+pub struct LpAnalytics {
+    // Position value
+    pub shares: u256,
+    pub share_value: u256, // Current value in collateral
+    pub share_percentage_bps: u256, // Your % of pool (in bps)
+    // Pool exposure
+    pub pool_tvl: u256,
+    pub available_liquidity: u256,
+    pub utilization_bps: u256, // Total utilization
+    // Risk exposure from active swaps
+    pub net_exposure: SignedValue, // + means pool is net short (swappers winning)
+    pub your_exposure: SignedValue, // Your share of net exposure
+    // Status
+    pub can_withdraw: bool, // Cooldown met?
+    pub max_withdrawable: u256 // How much can be withdrawn now
+}
+
+/// Scenario projection for what-if analysis
+#[derive(Drop, Copy, Serde)]
+pub struct ScenarioResult {
+    pub rate_bps: u256, // The hypothetical rate
+    pub pnl: SignedValue, // PnL at this rate
+    pub is_profitable: bool,
+}
+
+// ============== User Dashboard Types ==============
+
+/// User's swap position summary (for dashboard)
+#[derive(Drop, Copy, Serde)]
+pub struct UserSwapSummary {
+    pub swap_id: u256,
+    pub pair_id: felt252,
+    pub side: SwapSide,
+    pub status: SwapStatus,
+    pub notional: u256,
+    pub collateral: u256,
+    pub current_pnl: SignedValue,
+    pub health_factor_bps: u256,
+    pub progress_bps: u256, // 0-10000
+    pub remaining_seconds: u64,
+}
+
+/// Aggregated user dashboard stats
+#[derive(Drop, Copy, Serde)]
+pub struct UserDashboard {
+    // Swap positions
+    pub total_swaps: u32,
+    pub active_swaps: u32,
+    pub total_notional: u256, // Sum of all active notional
+    pub total_collateral_locked: u256, // Sum of all collateral in swaps
+    pub total_unrealized_pnl: SignedValue, // Sum of all current PnL
+    // LP positions
+    pub total_lp_value: u256, // Sum of all LP share values
+    pub total_lp_positions: u32, // Number of markets with LP
+    // Combined
+    pub total_portfolio_value: u256 // Collateral + LP value (adjusted for PnL)
+}
+
+/// LP position summary per market
+#[derive(Drop, Copy, Serde)]
+pub struct UserLpSummary {
+    pub pair_id: felt252,
+    pub shares: u256,
+    pub share_value: u256,
+    pub share_percentage_bps: u256,
+    pub utilization_bps: u256,
+    pub can_withdraw: bool,
 }
 
