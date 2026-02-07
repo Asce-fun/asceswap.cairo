@@ -1,75 +1,59 @@
-// // Use strict approve, transfers where u want amount to be non zero for sure
-// // Use other functions for more flexibility. e.g. during fee transfers where fee can be zero
-// sometimes
+pub mod SafeERC20 {
+    use core::num::traits::Zero;
+    use starknet::ContractAddress;
+    use crate::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
-// pub mod ERC20HelperLib {
-//     use starknet::{ContractAddress};
-//     use openzeppelin::token::erc20::interface::{
-//         IERC20, ERC20ABIDispatcher, ERC20ABIDispatcherTrait
-//     };
-//     use core::num::traits::Zero;
+    /// Safe transfer - validates recipient is non-zero and asserts success
+    /// Skips transfer if amount is 0 (avoids wasting gas on no-op)
+    pub fn safe_transfer(token: ContractAddress, recipient: ContractAddress, amount: u256) {
+        assert(!recipient.is_zero(), 'SafeERC20: zero recipient');
+        if amount != 0 {
+            let dispatcher = IERC20Dispatcher { contract_address: token };
+            let success = dispatcher.transfer(recipient, amount);
+            assert(success, 'SafeERC20: transfer failed');
+        }
+    }
 
-//     pub fn approve(token: ContractAddress, spender: ContractAddress, amount: u256) {
-//         assert(spender.is_non_zero(), 'ERC20::approve::spender 0');
-//         if (amount != 0) {
-//             //// println!("approving");
-//             let approved = ERC20ABIDispatcher { contract_address: token }.approve(spender,
-//             amount);
-//             assert(approved, 'ERC20: approve failed');
+    /// Strict transfer - same as safe_transfer but requires amount > 0
+    pub fn strict_transfer(token: ContractAddress, recipient: ContractAddress, amount: u256) {
+        assert(amount != 0, 'SafeERC20: zero amount');
+        safe_transfer(token, recipient, amount);
+    }
 
-//         }
-//     }
+    /// Safe transfer_from - validates recipient, asserts success
+    /// Skips if amount is 0 or sender == recipient
+    pub fn safe_transfer_from(
+        token: ContractAddress, sender: ContractAddress, recipient: ContractAddress, amount: u256,
+    ) {
+        assert(!recipient.is_zero(), 'SafeERC20: zero recipient');
+        if amount != 0 && sender != recipient {
+            let dispatcher = IERC20Dispatcher { contract_address: token };
+            let success = dispatcher.transfer_from(sender, recipient, amount);
+            assert(success, 'SafeERC20: transferFrom failed');
+        }
+    }
 
-//     pub fn strict_approve(token: ContractAddress, spender: ContractAddress, amount: u256) {
-//         assert(amount != 0, 'ERC20::strict_approve::amount 0');
-//         approve(token, spender, amount);
-//     }
+    /// Strict transfer_from - requires amount > 0
+    pub fn strict_transfer_from(
+        token: ContractAddress, sender: ContractAddress, recipient: ContractAddress, amount: u256,
+    ) {
+        assert(amount != 0, 'SafeERC20: zero amount');
+        safe_transfer_from(token, sender, recipient, amount);
+    }
 
-//     pub fn transfer(token: ContractAddress, receipient: ContractAddress, amount: u256) {
-//         assert(receipient.is_non_zero(), 'ERC20::transfer::receipient 0');
-//         if (amount != 0) {
-//             //// println!("transfering");
-//             let transferred = ERC20ABIDispatcher { contract_address: token }
-//                 .transfer(receipient, amount);
-//             assert(transferred, 'ERC20: transfer failed');
-//         //// println!("transferred");
-//         }
-//     }
+    /// Safe approve - validates spender is non-zero
+    pub fn safe_approve(token: ContractAddress, spender: ContractAddress, amount: u256) {
+        assert(!spender.is_zero(), 'SafeERC20: zero spender');
+        if amount != 0 {
+            let dispatcher = IERC20Dispatcher { contract_address: token };
+            let success = dispatcher.approve(spender, amount);
+            assert(success, 'SafeERC20: approve failed');
+        }
+    }
 
-//     pub fn strict_transfer(token: ContractAddress, receipient: ContractAddress, amount: u256) {
-//         assert(amount != 0, 'ERC20::transfer: amt 0');
-//         transfer(token, receipient, amount);
-//     }
-
-//     pub fn transfer_from(
-//         token: ContractAddress, sender: ContractAddress, receipient: ContractAddress, amount:
-//         u256
-//     ) {
-//         assert(receipient.is_non_zero(), 'ERC20::transfer_from::rcpt 0');
-//         if (amount != 0 && receipient != sender) {
-//             //// println!("transfering from: {:?}", amount);
-//             let bal = ERC20ABIDispatcher { contract_address: token }.balanceOf(sender);
-//             //// println!("balance of sender: {:?}", bal);
-//             let transferred = ERC20ABIDispatcher { contract_address: token }
-//                 .transferFrom(sender, receipient, amount);
-//             assert(transferred, 'ERC20: transfer from failed');
-//         //// println!("transferred from");
-//         }
-//     }
-
-//     pub fn strict_transfer_from(
-//         token: ContractAddress, sender: ContractAddress, receipient: ContractAddress, amount:
-//         u256
-//     ) {
-//         assert(amount != 0, 'ERC20::transfer_from::amt 0');
-//         transfer_from(token, sender, receipient, amount);
-//     }
-
-//     pub fn balanceOf(token: ContractAddress, address: ContractAddress) -> u256 {
-//         ERC20ABIDispatcher { contract_address: token }.balanceOf(address)
-//     }
-
-//     pub fn totalSupply(token: ContractAddress) -> u256 {
-//         ERC20ABIDispatcher { contract_address: token }.totalSupply()
-//     }
-// }
+    /// Get balance of an address
+    pub fn balance_of(token: ContractAddress, account: ContractAddress) -> u256 {
+        let dispatcher = IERC20Dispatcher { contract_address: token };
+        dispatcher.balance_of(account)
+    }
+}
