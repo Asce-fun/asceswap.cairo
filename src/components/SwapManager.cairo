@@ -126,7 +126,12 @@ pub mod SwapManagerComponent {
             assert(notional >= *market.params.min_notional, Errors::BELOW_MIN_NOTIONAL);
             assert(notional <= *market.params.max_notional_per_swap, Errors::ABOVE_MAX_NOTIONAL);
             //@audit: shouldn't collateral amount be a factor of notional amount ?
-            assert(collateral > 0, Errors::ZERO_AMOUNT);
+            // assert(collateral > 0, Errors::ZERO_AMOUNT);
+
+            assert(
+                notional <= collateral * *market.params.initial_margin_multiplier_bps,
+                'Exceeds max leverage',
+            );
 
             let current_time = get_block_timestamp();
 
