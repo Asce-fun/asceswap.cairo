@@ -113,7 +113,7 @@ pub mod SettlementEngine {
             SettlementType::Normal => { (base_pnl, 0_u256, 0_u256) },
             SettlementType::EarlyExit => {
                 let penalty = Utils::calculate_fee(
-                    *swap.buyer_collateral, *params.early_exit_fee_bps,
+                    *swap.initial_required_margin, *params.early_exit_fee_bps,
                 );
                 let adjusted = apply_early_exit_penalty(base_pnl, penalty);
                 (adjusted, penalty, 0_u256)
@@ -122,7 +122,7 @@ pub mod SettlementEngine {
                 // For liquidation, buyer loses everything
                 // Liquidator gets bonus, rest goes to pool
                 let bonus = Utils::calculate_fee(
-                    *swap.buyer_collateral, *params.liquidation_bonus_bps,
+                    *swap.initial_required_margin, *params.liquidation_bonus_bps,
                 );
                 // Use the base PnL but the payout calculation will be different
                 (base_pnl, 0_u256, bonus)
