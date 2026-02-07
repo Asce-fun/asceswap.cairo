@@ -73,6 +73,7 @@ pub mod MarketManagerComponent {
             // Get oracle rate
             let (initial_rate, rate_timestamp) = self._get_oracle_rate(rate_oracle);
             let current_time = get_block_timestamp();
+            assert(current_time >= rate_timestamp, Errors::ORACLE_INVALID_RATE);
 
             assert(
                 current_time - rate_timestamp <= params.max_oracle_staleness_seconds,
@@ -142,7 +143,7 @@ pub mod MarketManagerComponent {
         /// Unpause a market
         fn _unpause_market(ref self: ComponentState<TContractState>, pair_id: felt252) {
             let mut market = self.markets.read(pair_id);
-            assert(market.status == MarketStatus::Paused, Errors::MARKET_NOT_ACTIVE);
+            assert(market.status == MarketStatus::Paused, Errors::MARKET_NOT_PAUSED);
             market.status = MarketStatus::Active;
             self.markets.write(pair_id, market);
             self.emit(MarketUnpaused { pair_id, timestamp: get_block_timestamp() });
@@ -205,7 +206,7 @@ pub mod MarketManagerComponent {
             ref self: ComponentState<TContractState>, ref market: MarketPair, current_time: u64,
         ) -> u256 {
             let (raw_rate, rate_timestamp) = self._get_oracle_rate(market.rate_oracle);
-
+            assert(current_time >= rate_timestamp, Errors::ORACLE_INVALID_RATE);
             // Check staleness
             assert(
                 current_time - rate_timestamp <= market.params.max_oracle_staleness_seconds,
@@ -222,14 +223,14 @@ pub mod MarketManagerComponent {
 
             // If first update, just initialize(although this condition should never trigger , since
             // we are already intializing at market creation)
-            if rate_index.last_update_time == 0 {
-                rate_index.last_update_time = current_time;
-                rate_index.last_rate_bps = raw_rate;
-                rate_index.cumulative_rate_time = 0;
-                rate_index.last_valid_rate_bps = raw_rate;
-                market.rate_index = rate_index;
-                return raw_rate;
-            }
+            // if rate_index.last_update_time == 0 {
+            //     rate_index.last_update_time = current_time;
+            //     rate_index.last_rate_bps = raw_rate;
+            //     rate_index.cumulative_rate_time = 0;
+            //     rate_index.last_valid_rate_bps = raw_rate;
+            //     market.rate_index = rate_index;
+            //     return raw_rate;
+            // }
 
             let time_delta: u256 = (current_time - rate_index.last_update_time).into();
 
