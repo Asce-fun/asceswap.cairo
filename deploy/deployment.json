@@ -1,0 +1,63 @@
+{
+  "network": "https://starknet-sepolia.infura.io/v3/44bdf2d1c8594cc9b16832398af754d7",
+  "timestamp": "2026-02-07T07:42:01.088Z",
+  "deployer": "0x02c402cda5fa6c196c87B2282F92CAcF1194e353a279ed9a82141AB2F6262f7A",
+  "contracts": {
+    "accessRegistry": "0x433ffa6794ad63277946c1229403b1af017eea040119eed3b55c4b71bfae46b",
+    "mockERC20": "0x44f5fbb2052877be660f777184700196c4d517d1734c71922f9f27605b7b69",
+    "asceswap": "0x5eac663dd930d72066e0f1a7fc96cbf246d80f8fb93c4d72380df789950f663",
+    "analytics": "0x757c191c3ccd3a62451fb0992eedd217953faae6eef99c4b96e0f642b826f5f"
+  },
+  "tokensMinted": "610000000000",
+  "markets": [
+    {
+      "pairId": 1,
+      "oracleName": "X mockUSDC Borrow Rate",
+      "oracleAddress": "0x3bc6e2389a4ee6b8efd6d871acff949d6b5fc778376d7d130d9642e9d8217f",
+      "initialRateBps": 500,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 2,
+      "oracleName": "ETH Borrow Rate",
+      "oracleAddress": "0x585e42fd0740c784f5d9dc802bf98c43941d697921da00824981570bc559f6d",
+      "initialRateBps": 350,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 3,
+      "oracleName": "STRK Borrow Rate",
+      "oracleAddress": "0x68ab8a7e0ce31033a1598c56922764cb3ab9a44c7f5c8fd623b6e29de294c9d",
+      "initialRateBps": 800,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 4,
+      "oracleName": "DAI Savings Rate",
+      "oracleAddress": "0x4b0a5e1c9fdaa8d96827c557fdc3619571bfff7a54d8ba02fdc34838d567d7",
+      "initialRateBps": 500,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 5,
+      "oracleName": "USDT Borrow Rate",
+      "oracleAddress": "0x4198b12723cf9b3302de1990b8b602e4dcf71f0ad159e08b2a9cc09e19b5699",
+      "initialRateBps": 450,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 6,
+      "oracleName": "wBTC Borrow Rate",
+      "oracleAddress": "0x78afe46c5f1bb68ffaef48ac5c8b5e6a5d1d7e446f7369d50373099ed6e886b",
+      "initialRateBps": 250,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    }
+  ],
+  "marketsCreatedAt": "2026-02-07T07:52:09.751Z"
+}

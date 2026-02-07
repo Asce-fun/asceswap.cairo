@@ -76,8 +76,8 @@ pub fn apply_pnl(base: u256, pnl: SignedValue) -> u256 {
     }
 }
 
-#[cfg(tests)]
-pub mod tests {
+#[cfg(test)]
+pub mod test {
     use super::*;
     #[test]
     fn test_positive_creation() {

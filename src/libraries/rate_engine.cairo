@@ -10,10 +10,9 @@ pub mod RateEngine {
     /// Calculate interest payment over a term
     /// payment = notional × rate_bps × term_seconds / (SECONDS_PER_YEAR × BPS)
     pub fn calculate_payment(notional: u256, rate_bps: u256, term_seconds: u64) -> u256 {
-        // Intermediate: notional * rate_bps
-        let rate_component = mul_div_down(notional, rate_bps, Constants::BPS);
-        // Apply term fraction
-        mul_div_down(rate_component, term_seconds.into(), Constants::SECONDS_PER_YEAR.into())
+        let numerator = notional * rate_bps * term_seconds.into();
+        let denominator = Constants::BPS * Constants::SECONDS_PER_YEAR.into();
+        numerator / denominator
     }
 
 

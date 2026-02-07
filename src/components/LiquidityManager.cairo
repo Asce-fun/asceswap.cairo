@@ -5,8 +5,8 @@ pub mod LiquidityManagerComponent {
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
     use crate::helpers::fixed_point::mul_div_down;
+    use crate::helpers::safe_erc20::SafeERC20;
     use crate::helpers::signed_value::{negative, positive};
-    use crate::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use crate::libraries::pool_accounting::PoolAccounting;
     use crate::types::asce_swap::{LpPool, LpPosition, PoolAnalytics, ProtocolConfig};
 
@@ -94,9 +94,9 @@ pub mod LiquidityManagerComponent {
             self.lp_positions.write((caller, pair_id), position);
 
             // Transfer tokens
-            let token = IERC20Dispatcher { contract_address: collateral_token };
-            let success = token.transfer_from(caller, get_contract_address(), amount);
-            assert(success, Errors::TRANSFER_FROM_FAILED);
+            SafeERC20::strict_transfer_from(
+                collateral_token, caller, get_contract_address(), amount,
+            );
 
             self
                 .emit(
@@ -152,9 +152,7 @@ pub mod LiquidityManagerComponent {
             pool.total_collateral = pool.total_collateral - withdrawal_amount;
 
             // Transfer tokens
-            let token = IERC20Dispatcher { contract_address: collateral_token };
-            let success = token.transfer(caller, withdrawal_amount);
-            assert(success, Errors::TRANSFER_FAILED);
+            SafeERC20::strict_transfer(collateral_token, caller, withdrawal_amount);
 
             self
                 .emit(
@@ -274,43 +272,6 @@ pub mod LiquidityManagerComponent {
             )
         }
 
-
-        /// Maximum deposit amount allowed
-        /// Returns u256 max since there's no explicit cap (utilization limits apply elsewhere)
-        // fn max_deposit(self: @ComponentState<TContractState>) -> u256 {
-        //     // No explicit deposit cap - utilization limits are checked at swap time
-        //     0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff_u256
-        // }
-
-        /// Maximum withdrawal for an LP (based on their position and available liquidity)
-        fn _max_withdraw(
-            self: @ComponentState<TContractState>,
-            lp: ContractAddress,
-            pair_id: felt252,
-            pool: @LpPool,
-        ) -> u256 {
-            let position = self.lp_positions.read((lp, pair_id));
-            if position.shares == 0 {
-                return 0;
-            }
-
-            // Calculate what their shares are worth
-            let position_value = PoolAccounting::calculate_withdrawal_amount(
-                position.shares, *pool.total_shares, *pool.total_collateral,
-            );
-
-            // Available liquidity constraint
-            let available = *pool.total_collateral
-                - *pool.locked_for_fixed
-                - *pool.locked_for_floating;
-
-            // Return the lesser of position value and available liquidity
-            if position_value < available {
-                position_value
-            } else {
-                available
-            }
-        }
 
         /// Check if cooldown period has passed for an LP
         fn _is_cooldown_met(

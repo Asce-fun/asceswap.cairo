@@ -37,36 +37,54 @@ fn test_deploy_asceswap() {
 #[test]
 fn test_create_market() {
     let (asceswap, erc20, oracle) = setup_contracts();
+    let initial_liquidity: u256 = 100000000; // 100 USDC
+
+    // Admin approves collateral for initial liquidity
+    start_cheat_caller_address(erc20.contract_address, Helper::admin());
+    erc20.approve(asceswap.contract_address, initial_liquidity);
+    stop_cheat_caller_address(erc20.contract_address);
 
     start_cheat_caller_address(asceswap.contract_address, Helper::admin());
-    let pair_id = asceswap
+    let (pair_id, shares) = asceswap
         .create_market_pair(
             oracle.contract_address,
             erc20.contract_address,
             Helper::curator(),
             Helper::default_market_params(),
+            initial_liquidity,
         );
     stop_cheat_caller_address(asceswap.contract_address);
 
     assert(pair_id == 1, 'first market');
+    let config = asceswap.get_protocol_config();
+    let expected_shares = initial_liquidity - config.burned_shares_amount;
+    assert(shares == expected_shares, 'shares minted');
 
     let market = asceswap.get_market(pair_id);
     assert(market.status == MarketStatus::Active, 'active');
     assert(market.rate_oracle == oracle.contract_address, 'oracle set');
+    assert(market.pool.total_collateral == initial_liquidity, 'pool has liquidity');
 }
 
 #[test]
 fn test_pause_unpause_market() {
     let (asceswap, erc20, oracle) = setup_contracts();
+    let initial_liquidity: u256 = 100000000;
+
+    // Admin approves collateral for initial liquidity
+    start_cheat_caller_address(erc20.contract_address, Helper::admin());
+    erc20.approve(asceswap.contract_address, initial_liquidity);
+    stop_cheat_caller_address(erc20.contract_address);
 
     // Create market
     start_cheat_caller_address(asceswap.contract_address, Helper::admin());
-    let pair_id = asceswap
+    let (pair_id, _) = asceswap
         .create_market_pair(
             oracle.contract_address,
             erc20.contract_address,
             Helper::curator(),
             Helper::default_market_params(),
+            initial_liquidity,
         );
 
     // Pause
@@ -86,19 +104,26 @@ fn test_pause_unpause_market() {
 #[test]
 fn test_lp_deposit() {
     let (asceswap, erc20, oracle) = setup_contracts();
+    let initial_liquidity: u256 = 100000000; // 100 USDC
 
-    // Create market
+    // Admin approves collateral for initial liquidity
+    start_cheat_caller_address(erc20.contract_address, Helper::admin());
+    erc20.approve(asceswap.contract_address, initial_liquidity);
+    stop_cheat_caller_address(erc20.contract_address);
+
+    // Create market with initial liquidity
     start_cheat_caller_address(asceswap.contract_address, Helper::admin());
-    let pair_id = asceswap
+    let (pair_id, _) = asceswap
         .create_market_pair(
             oracle.contract_address,
             erc20.contract_address,
             Helper::curator(),
             Helper::default_market_params(),
+            initial_liquidity,
         );
     stop_cheat_caller_address(asceswap.contract_address);
 
-    // LP approves and deposits
+    // LP approves and deposits (second deposit — proportional shares)
     let deposit: u256 = 100000000; // 100 USDC
 
     start_cheat_caller_address(erc20.contract_address, Helper::lp1());
@@ -109,28 +134,33 @@ fn test_lp_deposit() {
     let shares = asceswap.supply_lp_collateral(pair_id, deposit);
     stop_cheat_caller_address(asceswap.contract_address);
 
-    // First deposit: shares = amount - burned_shares
-    let config = asceswap.get_protocol_config();
-    let expected = deposit - config.burned_shares_amount;
-    assert(shares == expected, 'shares minted');
+    // Second deposit: proportional shares (pool already has liquidity from creation)
+    assert(shares > 0, 'shares minted');
 
     // Check position
     let position = asceswap.get_lp_position(Helper::lp1(), pair_id);
-    assert(position.shares == expected, 'position updated');
+    assert(position.shares == shares, 'position updated');
 }
 
 #[test]
 fn test_lp_withdraw_after_cooldown() {
     let (asceswap, erc20, oracle) = setup_contracts();
+    let initial_liquidity: u256 = 100000000;
 
-    // Create market
+    // Admin approves collateral for initial liquidity
+    start_cheat_caller_address(erc20.contract_address, Helper::admin());
+    erc20.approve(asceswap.contract_address, initial_liquidity);
+    stop_cheat_caller_address(erc20.contract_address);
+
+    // Create market with initial liquidity
     start_cheat_caller_address(asceswap.contract_address, Helper::admin());
-    let pair_id = asceswap
+    let (pair_id, _) = asceswap
         .create_market_pair(
             oracle.contract_address,
             erc20.contract_address,
             Helper::curator(),
             Helper::default_market_params(),
+            initial_liquidity,
         );
     stop_cheat_caller_address(asceswap.contract_address);
 
@@ -166,27 +196,23 @@ fn setup_market_with_liquidity() -> (
     IAsceSwapDispatcher, IMockERC20Dispatcher, IMockOracleDispatcher, felt252,
 ) {
     let (asceswap, erc20, oracle) = setup_contracts();
+    let initial_liquidity: u256 = 1000000000; // 1000 USDC
 
-    // Create market
+    // Admin approves collateral for initial liquidity
+    start_cheat_caller_address(erc20.contract_address, Helper::admin());
+    erc20.approve(asceswap.contract_address, initial_liquidity);
+    stop_cheat_caller_address(erc20.contract_address);
+
+    // Create market with initial liquidity in a single call
     start_cheat_caller_address(asceswap.contract_address, Helper::admin());
-    let pair_id = asceswap
+    let (pair_id, _) = asceswap
         .create_market_pair(
             oracle.contract_address,
             erc20.contract_address,
             Helper::curator(),
             Helper::default_market_params(),
+            initial_liquidity,
         );
-    stop_cheat_caller_address(asceswap.contract_address);
-
-    // LP deposits
-    let deposit: u256 = 1000000000; // 1000 USDC
-
-    start_cheat_caller_address(erc20.contract_address, Helper::lp1());
-    erc20.approve(asceswap.contract_address, deposit);
-    stop_cheat_caller_address(erc20.contract_address);
-
-    start_cheat_caller_address(asceswap.contract_address, Helper::lp1());
-    asceswap.supply_lp_collateral(pair_id, deposit);
     stop_cheat_caller_address(asceswap.contract_address);
 
     (asceswap, erc20, oracle, pair_id)
@@ -247,8 +273,8 @@ fn test_settle_swap() {
     // Update oracle timestamp to match (rate stays the same)
     oracle.set_rate(500, new_time);
 
-    // Settle
-    start_cheat_caller_address(asceswap.contract_address, Helper::user2());
+    // Settle (must be called by swap owner)
+    start_cheat_caller_address(asceswap.contract_address, Helper::user1());
     asceswap.settle_swap(swap_id);
     stop_cheat_caller_address(asceswap.contract_address);
 
@@ -328,6 +354,10 @@ fn setup_contracts() -> (IAsceSwapDispatcher, IMockERC20Dispatcher, IMockOracleD
     start_cheat_block_timestamp(asceswap_address, initial_time);
 
     // Mint tokens to test users
+    erc20
+        .mint(
+            Helper::admin(), 100000000000,
+        ); // 100,000 USDC (for initial liquidity on market creation)
     erc20.mint(Helper::user1(), 10000000000); // 10,000 USDC
     erc20.mint(Helper::lp1(), 100000000000); // 100,000 USDC
 

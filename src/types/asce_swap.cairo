@@ -141,6 +141,7 @@ pub struct ProtocolConfig {
     pub min_first_lp_deposit: u256, // Minimum for first LP
     pub burned_shares_amount: u256, // Shares burned on first deposit
     pub market_creation_fees: u256,
+    pub fee_token: ContractAddress,
 }
 
 
@@ -199,7 +200,6 @@ pub struct SettlementResult {
     pub pnl: SignedValue,
 }
 
-// ============== Analytics Types ==============
 
 /// Comprehensive swap analytics for frontend display
 #[derive(Drop, Copy, Serde)]
@@ -253,7 +253,6 @@ pub struct ScenarioResult {
     pub is_profitable: bool,
 }
 
-// ============== User Dashboard Types ==============
 
 /// User's swap position summary (for dashboard)
 #[derive(Drop, Copy, Serde)]

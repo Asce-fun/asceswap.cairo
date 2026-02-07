@@ -3,6 +3,8 @@ target
 snfoundry_trace/
 coverage/
 profile/
-REFACTORING_PROPOSAL.md
 .claude
 UI_DESIGN.md
+deploy/node_modules
+deploy/.env
+deploy/deployment.json

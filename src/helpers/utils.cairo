@@ -138,9 +138,10 @@ pub fn max_u64(a: u64, b: u64) -> u64 {
     }
 }
 
-#[cfg(tests)]
-pub mod tests {
+#[cfg(test)]
+pub mod test {
     use super::*;
+    use super::Utils::*;
 
     #[test]
     fn test_min_basic() {
