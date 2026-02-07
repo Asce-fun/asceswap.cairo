@@ -6,6 +6,7 @@ use starknet::ContractAddress;
 #[starknet::interface]
 pub trait IMockOracle<TContractState> {
     fn get_rate(self: @TContractState) -> (u256, u64);
+    fn name(self: @TContractState) -> ByteArray;
     fn set_rate(ref self: TContractState, rate_bps: u256, timestamp: u64);
     fn set_stale(ref self: TContractState, is_stale: bool);
 }
@@ -16,13 +17,17 @@ pub mod MockOracle {
 
     #[storage]
     struct Storage {
+        oracle_name: ByteArray,
         rate_bps: u256,
         timestamp: u64,
         is_stale: bool,
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, initial_rate: u256, initial_timestamp: u64) {
+    fn constructor(
+        ref self: ContractState, name: ByteArray, initial_rate: u256, initial_timestamp: u64,
+    ) {
+        self.oracle_name.write(name);
         self.rate_bps.write(initial_rate);
         self.timestamp.write(initial_timestamp);
         self.is_stale.write(false);
@@ -37,6 +42,10 @@ pub mod MockOracle {
                 self.timestamp.read()
             };
             (self.rate_bps.read(), timestamp)
+        }
+
+        fn name(self: @ContractState) -> ByteArray {
+            self.oracle_name.read()
         }
 
         fn set_rate(ref self: ContractState, rate_bps: u256, timestamp: u64) {
@@ -58,10 +67,7 @@ pub trait IMockERC20<TContractState> {
     fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
     fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
     fn transfer_from(
-        ref self: TContractState,
-        sender: ContractAddress,
-        recipient: ContractAddress,
-        amount: u256,
+        ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256,
     ) -> bool;
     fn balance_of(self: @TContractState, account: ContractAddress) -> u256;
     fn allowance(self: @TContractState, owner: ContractAddress, spender: ContractAddress) -> u256;
