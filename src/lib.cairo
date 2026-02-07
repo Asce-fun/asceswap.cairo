@@ -1,4 +1,5 @@
 pub mod components {
+    pub mod Analytics;
     pub mod LiquidityManager;
     pub mod MarketManager;
     pub mod Security;
@@ -24,6 +25,7 @@ pub mod helpers {
     pub mod errors;
     pub mod fixed_point;
     pub mod roles;
+    pub mod safe_erc20;
     pub mod signed_value;
     pub mod utils;
 }
