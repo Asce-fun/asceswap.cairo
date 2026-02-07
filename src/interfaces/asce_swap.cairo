@@ -7,14 +7,15 @@ use crate::types::asce_swap::{
 
 #[starknet::interface]
 pub trait IAsceSwap<TContractState> {
-    /// Create a new market pair
+    /// Create a new market pair with initial liquidity
     fn create_market_pair(
         ref self: TContractState,
         rate_oracle: ContractAddress,
         collateral_token: ContractAddress,
         curator: ContractAddress,
         params: MarketParams,
-    ) -> felt252;
+        initial_liquidity_amount: u256,
+    ) -> (felt252, u256);
 
     /// Pause a market
     fn pause_market(ref self: TContractState, pair_id: felt252);
@@ -79,7 +80,7 @@ pub trait IAsceSwap<TContractState> {
 
     fn exchange_rate_for_lp(self: @TContractState, pair_id: felt252) -> u256;
     fn convert_to_shares_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-    fn convert_to_assets_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
+    fn convert_to_assets_for_lp(self: @TContractState, shares: u256, pair_id: felt252) -> u256;
 
 
     fn preview_deposit_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
@@ -100,7 +101,6 @@ pub trait IAsceSwap<TContractState> {
     /// Get next swap ID
     fn get_next_swap_id(self: @TContractState) -> u256;
 
-    // ============== Analytics Functions ==============
 
     /// Get comprehensive swap analytics (for frontend dashboard)
     fn get_swap_analytics(self: @TContractState, swap_id: u256) -> SwapAnalytics;
@@ -119,8 +119,6 @@ pub trait IAsceSwap<TContractState> {
     /// Get breakeven rate for a swap (the rate at which PnL = 0)
     fn get_breakeven_rate(self: @TContractState, swap_id: u256) -> u256;
 
-    // ============== User Dashboard Functions ==============
-
     /// Get summary of multiple swaps (pass swap IDs from indexer/events)
     fn get_user_swaps_summary(self: @TContractState, swap_ids: Span<u256>) -> Span<UserSwapSummary>;
 
@@ -138,10 +136,9 @@ pub trait IAsceSwap<TContractState> {
     ) -> Span<UserLpSummary>;
 
     // ============================================================
-    // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
+    // TODO [MAINNET]: Replace with off-chain indexer
     // These use on-chain arrays which don't scale well.
     // ============================================================
-
     /// Get all swap IDs owned by a user
     fn get_user_swap_ids(self: @TContractState, user: ContractAddress) -> Span<u256>;
 
@@ -153,4 +150,5 @@ pub trait IAsceSwap<TContractState> {
 
     /// Get count of user's LP positions
     fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
+    fn poke_rate_index(ref self: TContractState, pair_id: felt252);
 }
