@@ -4,26 +4,26 @@ pub mod Asceswap {
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_security::ReentrancyGuardComponent::InternalTrait as ReentrancyGuardInternalTrait;
     use openzeppelin_security::{PausableComponent, ReentrancyGuardComponent};
-    use openzeppelin_token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
+    use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_upgrades::UpgradeableComponent;
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use crate::components::Analytics::AnalyticsComponent;
     use crate::components::LiquidityManager::LiquidityManagerComponent;
     use crate::components::MarketManager::MarketManagerComponent;
     use crate::components::Security::SecurityComponent;
     use crate::components::SwapManager::SwapManagerComponent;
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
-    use crate::helpers::signed_value::{negative, positive};
+    use crate::helpers::safe_erc20::SafeERC20;
     use crate::interfaces::asce_swap::IAsceSwap;
-    use crate::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, MarketStatus,
-        PoolAnalytics, ProtocolConfig, ScenarioResult, SignedValue, Swap, SwapAnalytics, SwapQuote,
-        SwapSide, SwapStatus, UserDashboard, UserLpSummary, UserSwapSummary,
+        PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
+        UserDashboard, UserLpSummary, UserSwapSummary,
     };
 
     // Component declarations
@@ -38,6 +38,7 @@ pub mod Asceswap {
         path: LiquidityManagerComponent, storage: liquidity_manager, event: LiquidityManagerEvent,
     );
     component!(path: SwapManagerComponent, storage: swap_manager, event: SwapManagerEvent);
+    component!(path: AnalyticsComponent, storage: analytics, event: AnalyticsEvent);
 
     // Embeddable implementations
     #[abi(embed_v0)]
@@ -52,6 +53,7 @@ pub mod Asceswap {
     impl MarketManagerInternalImpl = MarketManagerComponent::InternalImpl<ContractState>;
     impl LiquidityManagerInternalImpl = LiquidityManagerComponent::InternalImpl<ContractState>;
     impl SwapManagerInternalImpl = SwapManagerComponent::InternalImpl<ContractState>;
+    impl AnalyticsInternalImpl = AnalyticsComponent::InternalImpl<ContractState>;
 
     #[storage]
     pub struct Storage {
@@ -75,6 +77,8 @@ pub mod Asceswap {
         liquidity_manager: LiquidityManagerComponent::Storage,
         #[substorage(v0)]
         swap_manager: SwapManagerComponent::Storage,
+        #[substorage(v0)]
+        analytics: AnalyticsComponent::Storage,
         // Protocol-level storage (stays in main contract)
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
@@ -115,14 +119,15 @@ pub mod Asceswap {
         LiquidityManagerEvent: LiquidityManagerComponent::Event,
         #[flat]
         SwapManagerEvent: SwapManagerComponent::Event,
-        FlagSetted: FlagSetted,
+        AnalyticsEvent: AnalyticsComponent::Event,
+        FlagSet: FlagSet,
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
         ProtocolConfigUpdated: ProtocolConfigUpdated,
         RateIndexUpdated: RateIndexUpdated,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct FlagSetted {
+    pub struct FlagSet {
         pub flag: bool,
     }
 
@@ -151,6 +156,8 @@ pub mod Asceswap {
     fn constructor(
         ref self: ContractState, access_registry: ContractAddress, treasury: ContractAddress,
     ) {
+        assert(!treasury.is_zero(), Errors::ZERO_ADDRESS);
+        assert(!access_registry.is_zero(), Errors::ZERO_ADDRESS);
         // Initialize ERC721
         self.erc721.initializer("AsceSwap V2 Position", "ASCE-V2", "");
 
@@ -161,6 +168,7 @@ pub mod Asceswap {
             min_first_lp_deposit: Constants::DEFAULT_MIN_FIRST_LP_DEPOSIT,
             burned_shares_amount: Constants::MIN_BURNED_SHARES,
             market_creation_fees: Constants::MARKET_CREATION_FEE,
+            fee_token: Constants::USDC(),
         };
         self.protocol_config.write(config);
 
@@ -180,7 +188,8 @@ pub mod Asceswap {
             collateral_token: ContractAddress,
             curator: ContractAddress,
             params: MarketParams,
-        ) -> felt252 {
+            initial_liquidity_amount: u256,
+        ) -> (felt252, u256) {
             // Reentrancy guard
             self.reentrancy.start();
             self._assert_not_paused();
@@ -204,8 +213,37 @@ pub mod Asceswap {
             // Deduct market creation fees
             self._deduct_market_creation_fees();
 
+            // Supply initial liquidity
+            let caller = get_caller_address();
+            let market = self.market_manager._get_market(pair_id);
+            let config = self.protocol_config.read();
+
+            let (shares, updated_pool) = self
+                .liquidity_manager
+                ._supply_lp_collateral(
+                    pair_id,
+                    initial_liquidity_amount,
+                    caller,
+                    market.pool,
+                    @config,
+                    market.collateral_token,
+                );
+
+            // Update market with new pool state
+            let mut updated_market = market;
+            updated_market.pool = updated_pool;
+            self.market_manager._write_market(pair_id, updated_market);
+
+            // Track user's LP pairs (first deposit to this pair)
+            if !self.user_has_lp_in_pair.read((caller, pair_id)) {
+                let lp_index = self.user_lp_count.read(caller);
+                self.user_lp_pairs.write((caller, lp_index), pair_id);
+                self.user_lp_count.write(caller, lp_index + 1);
+                self.user_has_lp_in_pair.write((caller, pair_id), true);
+            }
+
             self.reentrancy.end();
-            pair_id
+            (pair_id, shares)
         }
 
         fn pause_market(ref self: ContractState, pair_id: felt252) {
@@ -330,10 +368,17 @@ pub mod Asceswap {
                     config.protocol_fee_share_bps,
                 );
 
-            // Transfer collateral (main contract handles transfers)
-            let token = IERC20Dispatcher { contract_address: market.collateral_token };
-            let success = token.transfer_from(caller, get_contract_address(), collateral);
-            assert(success, Errors::TRANSFER_FROM_FAILED);
+            // Transfer collateral using SafeERC20
+            let balance_before = SafeERC20::balance_of(
+                market.collateral_token, get_contract_address(),
+            );
+            SafeERC20::strict_transfer_from(
+                market.collateral_token, caller, get_contract_address(), collateral,
+            );
+            let balance_after = SafeERC20::balance_of(
+                market.collateral_token, get_contract_address(),
+            );
+            assert(balance_after - balance_before >= collateral, 'Received less than expected');
 
             // Mint NFT
             self.erc721.mint(caller, swap_id);
@@ -369,6 +414,7 @@ pub mod Asceswap {
             let pair_id = swap.pair_id; // extract before move
             let mut market = self.market_manager._get_market(pair_id);
             let owner = self.erc721.owner_of(swap_id);
+            assert(owner == get_caller_address(), Errors::UNAUTHORIZED);
             let current_time = get_block_timestamp();
 
             // Update rate index
@@ -383,11 +429,7 @@ pub mod Asceswap {
             self.erc721.burn(swap_id);
 
             // Transfer payout
-            if result.buyer_payout > 0 {
-                let token = IERC20Dispatcher { contract_address: market.collateral_token };
-                let success = token.transfer(owner, result.buyer_payout);
-                assert(success, Errors::TRANSFER_FAILED);
-            }
+            SafeERC20::safe_transfer(market.collateral_token, owner, result.buyer_payout);
 
             // Update market state
             market.pool = updated_pool;
@@ -421,11 +463,7 @@ pub mod Asceswap {
             self.erc721.burn(swap_id);
 
             // Transfer payout
-            if result.buyer_payout > 0 {
-                let token = IERC20Dispatcher { contract_address: market.collateral_token };
-                let success = token.transfer(owner, result.buyer_payout);
-                assert(success, Errors::TRANSFER_FAILED);
-            }
+            SafeERC20::safe_transfer(market.collateral_token, owner, result.buyer_payout);
 
             // Update market state
             market.pool = updated_pool;
@@ -459,11 +497,7 @@ pub mod Asceswap {
             self.erc721.burn(swap_id);
 
             // Transfer liquidator bonus
-            if result.liquidator_bonus > 0 {
-                let token = IERC20Dispatcher { contract_address: market.collateral_token };
-                let success = token.transfer(liquidator, result.liquidator_bonus);
-                assert(success, Errors::TRANSFER_FAILED);
-            }
+            SafeERC20::safe_transfer(market.collateral_token, liquidator, result.liquidator_bonus);
 
             // Update market state
             market.pool = updated_pool;
@@ -525,7 +559,7 @@ pub mod Asceswap {
         fn set_premission_less_flag(ref self: ContractState, flag: bool) {
             self.security.assert_admin_role();
             self.permissioned_flag.write(flag);
-            self.emit(FlagSetted { flag });
+            self.emit(FlagSet { flag });
         }
 
 
@@ -541,10 +575,10 @@ pub mod Asceswap {
             self.liquidity_manager._convert_to_shares(assets, @market.pool)
         }
 
-        fn convert_to_assets_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
+        fn convert_to_assets_for_lp(self: @ContractState, shares: u256, pair_id: felt252) -> u256 {
             let market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
-            self.liquidity_manager._convert_to_assets(assets, @market.pool)
+            self.liquidity_manager._convert_to_assets(shares, @market.pool)
         }
 
         fn preview_deposit_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
@@ -569,260 +603,53 @@ pub mod Asceswap {
             self.liquidity_manager._balance_of(lp, pair_id)
         }
 
-        // ============== Analytics Functions ==============
-
         fn get_swap_analytics(self: @ContractState, swap_id: u256) -> SwapAnalytics {
-            let swap = self.swap_manager.get_swap(swap_id);
-            let market = self.market_manager._get_market(swap.pair_id);
-            let health = self.swap_manager.get_health_status(swap_id, @market);
-            let current_time = get_block_timestamp();
-
-            // Get current floating rate from oracle
-            let (current_floating_rate_bps, _) = self
-                .market_manager
-                ._get_oracle_rate(market.rate_oracle);
-
-            // Calculate spread: floating - fixed
-            let current_spread_bps = if current_floating_rate_bps >= swap.fixed_rate_bps {
-                positive(current_floating_rate_bps - swap.fixed_rate_bps)
-            } else {
-                negative(swap.fixed_rate_bps - current_floating_rate_bps)
-            };
-
-            // Calculate leverage: notional / collateral * 100
-            let leverage_x100 = if swap.buyer_collateral > 0 {
-                (swap.notional * 100) / swap.buyer_collateral
-            } else {
-                0
-            };
-
-            // Time calculations
-            let term_seconds = swap.expiration_time - swap.start_time;
-            let elapsed_seconds = if current_time > swap.start_time {
-                if current_time > swap.expiration_time {
-                    term_seconds
-                } else {
-                    current_time - swap.start_time
-                }
-            } else {
-                0
-            };
-            let remaining_seconds = if current_time < swap.expiration_time {
-                swap.expiration_time - current_time
-            } else {
-                0
-            };
-
-            // Progress in bps (0-10000)
-            let progress_bps = if term_seconds > 0 {
-                (elapsed_seconds.into() * Constants::BPS) / term_seconds.into()
-            } else {
-                0
-            };
-
-            // Calculate yield (annualized based on current spread and leverage)
-            // yield_term = spread * leverage * (365 / term_days)
-            let term_days = term_seconds / 86400;
-            let yield_term_bps = if term_days > 0 && swap.buyer_collateral > 0 {
-                // yield = spread_bps * leverage * (365 / term_days)
-                // This gives annualized yield in bps
-                let spread_value = current_spread_bps.value;
-                let annualization_factor = 365_u256 / term_days.into();
-                let yield_value = (spread_value * leverage_x100 * annualization_factor) / 100;
-
-                // Adjust sign based on swap side
-                match swap.side {
-                    SwapSide::Fixed => {
-                        // Fixed side profits when floating > fixed (positive spread)
-                        if current_spread_bps.is_negative {
-                            negative(yield_value)
-                        } else {
-                            positive(yield_value)
-                        }
-                    },
-                    SwapSide::Floating => {
-                        // Floating side profits when floating < fixed (negative spread)
-                        if current_spread_bps.is_negative {
-                            positive(yield_value)
-                        } else {
-                            negative(yield_value)
-                        }
-                    },
-                }
-            } else {
-                positive(0)
-            };
-
-            // Projected PnL at expiry if rate stays the same
-            let projected_pnl_at_expiry = self
-                ._calculate_projected_pnl(@swap, current_floating_rate_bps, swap.expiration_time);
-
-            SwapAnalytics {
-                current_pnl: health.current_pnl,
-                current_floating_rate_bps,
-                fixed_rate_bps: swap.fixed_rate_bps,
-                current_spread_bps,
-                leverage_x100,
-                yield_term_bps,
-                current_return: health.current_pnl,
-                notional: swap.notional,
-                collateral: swap.buyer_collateral,
-                health_factor_bps: health.health_factor_bps,
-                is_liquidatable: health.is_liquidatable,
-                elapsed_seconds,
-                remaining_seconds,
-                progress_bps,
-                projected_pnl_at_expiry,
-            }
+            self.analytics._get_swap_analytics(swap_id)
         }
 
         fn get_lp_analytics(
             self: @ContractState, lp: ContractAddress, pair_id: felt252,
         ) -> LpAnalytics {
-            let market = self.market_manager._get_market(pair_id);
-            let lp_position = self.liquidity_manager._get_lp_position(lp, pair_id);
-            let pool_analytics = self.liquidity_manager._get_pool_analytics(@market.pool);
-
-            // Calculate share value
-            let share_value = self
-                .liquidity_manager
-                ._convert_to_assets(lp_position.shares, @market.pool);
-
-            // Calculate share percentage (in bps)
-            let share_percentage_bps = if market.pool.total_shares > 0 {
-                (lp_position.shares * Constants::BPS) / market.pool.total_shares
-            } else {
-                0
-            };
-
-            // Calculate total utilization
-            let total_locked = market.pool.locked_for_fixed + market.pool.locked_for_floating;
-            let utilization_bps = if market.pool.total_collateral > 0 {
-                (total_locked * Constants::BPS) / market.pool.total_collateral
-            } else {
-                0
-            };
-
-            // Calculate your share of the net exposure
-            let your_exposure = if share_percentage_bps > 0 {
-                let exposure_value = (pool_analytics.net_exposure_notional.value
-                    * share_percentage_bps)
-                    / Constants::BPS;
-                if pool_analytics.net_exposure_notional.is_negative {
-                    negative(exposure_value)
-                } else {
-                    positive(exposure_value)
-                }
-            } else {
-                positive(0)
-            };
-
-            // Check withdrawal capability
-            let can_withdraw = self.liquidity_manager._is_cooldown_met(lp, pair_id);
-            let max_withdrawable = if can_withdraw {
-                // Max is lesser of: share value or available liquidity
-                if share_value < pool_analytics.available_liquidity {
-                    share_value
-                } else {
-                    pool_analytics.available_liquidity
-                }
-            } else {
-                0
-            };
-
-            LpAnalytics {
-                shares: lp_position.shares,
-                share_value,
-                share_percentage_bps,
-                pool_tvl: pool_analytics.total_value,
-                available_liquidity: pool_analytics.available_liquidity,
-                utilization_bps,
-                net_exposure: pool_analytics.net_exposure_notional,
-                your_exposure,
-                can_withdraw,
-                max_withdrawable,
-            }
+            self.analytics._get_lp_analytics(lp, pair_id)
         }
 
         fn preview_swap_scenarios(
             self: @ContractState, swap_id: u256, rate_scenarios_bps: Span<u256>,
         ) -> Span<ScenarioResult> {
-            let swap = self.swap_manager.get_swap(swap_id);
-            let mut results: Array<ScenarioResult> = array![];
-
-            for rate_bps in rate_scenarios_bps {
-                let pnl = self._calculate_projected_pnl(@swap, *rate_bps, swap.expiration_time);
-                let is_profitable = !pnl.is_negative && pnl.value > 0;
-
-                results.append(ScenarioResult { rate_bps: *rate_bps, pnl, is_profitable });
-            }
-
-            results.span()
+            self.analytics._preview_swap_scenarios(swap_id, rate_scenarios_bps)
         }
 
         fn get_breakeven_rate(self: @ContractState, swap_id: u256) -> u256 {
-            let swap = self.swap_manager.get_swap(swap_id);
-            // Breakeven is simply the fixed rate for both sides
-            // For Fixed side: profitable when floating > fixed
-            // For Floating side: profitable when floating < fixed
-            // Breakeven is when floating == fixed
-            swap.fixed_rate_bps
+            self.analytics._get_breakeven_rate(swap_id)
         }
 
-        // ============== User Dashboard Functions ==============
+        fn poke_rate_index(ref self: ContractState, pair_id: felt252) {
+            self.reentrancy.start();
+            self._assert_not_paused();
+            let mut market = self.market_manager._get_market(pair_id);
+            assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
+            let current_time = get_block_timestamp();
+
+            let oracle_rate = self.market_manager._update_rate_index(ref market, current_time);
+
+            self.market_manager._write_market(pair_id, market);
+
+            self
+                .emit(
+                    RateIndexUpdated {
+                        pair_id,
+                        new_rate_bps: oracle_rate,
+                        cumulative_rate_time: market.rate_index.cumulative_rate_time,
+                        timestamp: current_time,
+                    },
+                );
+            self.reentrancy.end()
+        }
 
         fn get_user_swaps_summary(
             self: @ContractState, swap_ids: Span<u256>,
         ) -> Span<UserSwapSummary> {
-            let mut summaries: Array<UserSwapSummary> = array![];
-            let current_time = get_block_timestamp();
-
-            for swap_id in swap_ids {
-                let swap = self.swap_manager.get_swap(*swap_id);
-                let market = self.market_manager._get_market(swap.pair_id);
-                let health = self.swap_manager.get_health_status(*swap_id, @market);
-
-                // Calculate progress
-                let term_seconds = swap.expiration_time - swap.start_time;
-                let elapsed = if current_time > swap.start_time {
-                    if current_time > swap.expiration_time {
-                        term_seconds
-                    } else {
-                        current_time - swap.start_time
-                    }
-                } else {
-                    0
-                };
-                let progress_bps = if term_seconds > 0 {
-                    (elapsed.into() * Constants::BPS) / term_seconds.into()
-                } else {
-                    0
-                };
-
-                let remaining_seconds = if current_time < swap.expiration_time {
-                    swap.expiration_time - current_time
-                } else {
-                    0
-                };
-
-                summaries
-                    .append(
-                        UserSwapSummary {
-                            swap_id: *swap_id,
-                            pair_id: swap.pair_id,
-                            side: swap.side,
-                            status: swap.status,
-                            notional: swap.notional,
-                            collateral: swap.buyer_collateral,
-                            current_pnl: health.current_pnl,
-                            health_factor_bps: health.health_factor_bps,
-                            progress_bps,
-                            remaining_seconds,
-                        },
-                    );
-            }
-
-            summaries.span()
+            self.analytics._get_user_swaps_summary(swap_ids)
         }
 
         fn get_user_dashboard(
@@ -831,137 +658,13 @@ pub mod Asceswap {
             swap_ids: Span<u256>,
             lp_pair_ids: Span<felt252>,
         ) -> UserDashboard {
-            let mut total_swaps: u32 = 0;
-            let mut active_swaps: u32 = 0;
-            let mut total_notional: u256 = 0;
-            let mut total_collateral_locked: u256 = 0;
-            let mut total_pnl_value: u256 = 0;
-            let mut total_pnl_negative: bool = false;
-
-            // Process swaps
-            for swap_id in swap_ids {
-                let swap = self.swap_manager.get_swap(*swap_id);
-                let market = self.market_manager._get_market(swap.pair_id);
-                let health = self.swap_manager.get_health_status(*swap_id, @market);
-
-                total_swaps += 1;
-
-                if swap.status == SwapStatus::Active {
-                    active_swaps += 1;
-                    total_notional += swap.notional;
-                    total_collateral_locked += swap.buyer_collateral;
-
-                    // Aggregate PnL (simplified - just track magnitude)
-                    if health.current_pnl.is_negative {
-                        if total_pnl_value >= health.current_pnl.value {
-                            total_pnl_value -= health.current_pnl.value;
-                        } else {
-                            total_pnl_value = health.current_pnl.value - total_pnl_value;
-                            total_pnl_negative = true;
-                        }
-                    } else {
-                        if total_pnl_negative {
-                            if total_pnl_value >= health.current_pnl.value {
-                                total_pnl_value -= health.current_pnl.value;
-                            } else {
-                                total_pnl_value = health.current_pnl.value - total_pnl_value;
-                                total_pnl_negative = false;
-                            }
-                        } else {
-                            total_pnl_value += health.current_pnl.value;
-                        }
-                    }
-                }
-            }
-
-            // Process LP positions
-            let mut total_lp_value: u256 = 0;
-            let mut total_lp_positions: u32 = 0;
-
-            for pair_id in lp_pair_ids {
-                let lp_position = self.liquidity_manager._get_lp_position(user, *pair_id);
-                if lp_position.shares > 0 {
-                    let market = self.market_manager._get_market(*pair_id);
-                    let share_value = self
-                        .liquidity_manager
-                        ._convert_to_assets(lp_position.shares, @market.pool);
-                    total_lp_value += share_value;
-                    total_lp_positions += 1;
-                }
-            }
-
-            // Calculate total portfolio value
-            let total_portfolio_value = if total_pnl_negative {
-                if total_collateral_locked >= total_pnl_value {
-                    total_collateral_locked - total_pnl_value + total_lp_value
-                } else {
-                    total_lp_value
-                }
-            } else {
-                total_collateral_locked + total_pnl_value + total_lp_value
-            };
-
-            UserDashboard {
-                total_swaps,
-                active_swaps,
-                total_notional,
-                total_collateral_locked,
-                total_unrealized_pnl: if total_pnl_negative {
-                    negative(total_pnl_value)
-                } else {
-                    positive(total_pnl_value)
-                },
-                total_lp_value,
-                total_lp_positions,
-                total_portfolio_value,
-            }
+            self.analytics._get_user_dashboard(user, swap_ids, lp_pair_ids)
         }
 
         fn get_user_lp_summary(
             self: @ContractState, user: ContractAddress, pair_ids: Span<felt252>,
         ) -> Span<UserLpSummary> {
-            let mut summaries: Array<UserLpSummary> = array![];
-
-            for pair_id in pair_ids {
-                let lp_position = self.liquidity_manager._get_lp_position(user, *pair_id);
-
-                if lp_position.shares > 0 {
-                    let market = self.market_manager._get_market(*pair_id);
-                    let share_value = self
-                        .liquidity_manager
-                        ._convert_to_assets(lp_position.shares, @market.pool);
-
-                    let share_percentage_bps = if market.pool.total_shares > 0 {
-                        (lp_position.shares * Constants::BPS) / market.pool.total_shares
-                    } else {
-                        0
-                    };
-
-                    let total_locked = market.pool.locked_for_fixed
-                        + market.pool.locked_for_floating;
-                    let utilization_bps = if market.pool.total_collateral > 0 {
-                        (total_locked * Constants::BPS) / market.pool.total_collateral
-                    } else {
-                        0
-                    };
-
-                    let can_withdraw = self.liquidity_manager._is_cooldown_met(user, *pair_id);
-
-                    summaries
-                        .append(
-                            UserLpSummary {
-                                pair_id: *pair_id,
-                                shares: lp_position.shares,
-                                share_value,
-                                share_percentage_bps,
-                                utilization_bps,
-                                can_withdraw,
-                            },
-                        );
-                }
-            }
-
-            summaries.span()
+            self.analytics._get_user_lp_summary(user, pair_ids)
         }
 
         // ============================================================
@@ -1007,8 +710,6 @@ pub mod Asceswap {
         }
 
         fn get_user_swap_count(self: @ContractState, user: ContractAddress) -> u32 {
-            // Returns raw count (may include transferred swaps)
-            // Use get_user_swap_ids for accurate count
             self.user_swap_count.read(user)
         }
 
@@ -1020,6 +721,7 @@ pub mod Asceswap {
 
         fn update_protocol_config(ref self: ContractState, config: ProtocolConfig) {
             self.security.assert_admin_role();
+            assert(!config.fee_token.is_zero(), Errors::ZERO_ADDRESS);
             assert(!config.treasury.is_zero(), Errors::ZERO_ADDRESS);
             assert(config.protocol_fee_share_bps <= (Constants::BPS / 5), Errors::INVALID_PARAMS);
             assert(
@@ -1046,13 +748,59 @@ pub mod Asceswap {
 
             self.protocol_fees.write(token, available - amount);
 
-            let token_contract = IERC20Dispatcher { contract_address: token };
-            let success = token_contract.transfer(recipient, amount);
-            assert(success, Errors::TRANSFER_FAILED);
+            SafeERC20::strict_transfer(token, recipient, amount);
 
             self.emit(ProtocolFeesWithdrawn { token, amount, recipient });
         }
     }
+
+
+    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
+        fn before_update(
+            ref self: ERC721Component::ComponentState<ContractState>,
+            to: ContractAddress,
+            token_id: u256,
+            auth: ContractAddress,
+        ) {
+            // Use _owner_of (returns zero for non-existent tokens) instead of
+            // owner_of (reverts on non-existent) so mints don't panic.
+            let from = self._owner_of(token_id);
+            let mut contract = self.get_contract_mut();
+
+            // If this is a transfer (not mint/burn), update both sender and receiver tracking
+            if !from.is_zero() && !to.is_zero() {
+                // Remove from sender's tracking (swap-and-pop)
+                let sender_count = contract.user_swap_count.read(from);
+                let mut i: u32 = 0;
+                while i < sender_count {
+                    if contract.user_swap_ids.read((from, i)) == token_id {
+                        // Move last element into this slot
+                        let last_index = sender_count - 1;
+                        if i != last_index {
+                            let last_swap_id = contract.user_swap_ids.read((from, last_index));
+                            contract.user_swap_ids.write((from, i), last_swap_id);
+                        }
+                        contract.user_swap_count.write(from, last_index);
+                        break;
+                    }
+                    i += 1;
+                }
+
+                // Add to receiver's tracking
+                let swap_index = contract.user_swap_count.read(to);
+                contract.user_swap_ids.write((to, swap_index), token_id);
+                contract.user_swap_count.write(to, swap_index + 1);
+            }
+        }
+
+        fn after_update(
+            ref self: ERC721Component::ComponentState<ContractState>,
+            to: ContractAddress,
+            token_id: u256,
+            auth: ContractAddress,
+        ) {}
+    }
+
 
     #[generate_trait]
     impl InternalFunctions of InternalFunctionsTrait {
@@ -1076,52 +824,19 @@ pub mod Asceswap {
             let protocol_config = self.protocol_config.read();
             if protocol_config.market_creation_fees > 0 {
                 let caller = get_caller_address();
-                let fee_token = IERC20Dispatcher { contract_address: Constants::USDC() };
-                let success = fee_token
-                    .transfer_from(
-                        caller, protocol_config.treasury, protocol_config.market_creation_fees,
-                    );
-                assert(success, Errors::TRANSFER_FAILED);
-            }
-        }
+                let fee_token_addr = protocol_config.fee_token;
+                SafeERC20::strict_transfer_from(
+                    fee_token_addr,
+                    caller,
+                    get_contract_address(),
+                    protocol_config.market_creation_fees,
+                );
 
-        /// Calculate projected PnL for a swap at a given rate and time
-        fn _calculate_projected_pnl(
-            self: @ContractState, swap: @Swap, projected_rate_bps: u256, at_time: u64,
-        ) -> SignedValue {
-            let notional = *swap.notional;
-            let fixed_rate = *swap.fixed_rate_bps;
-            let term_seconds = at_time - *swap.start_time;
-
-            // Calculate payments using rate engine formula
-            // payment = notional * rate_bps * term_seconds / (BPS * SECONDS_PER_YEAR)
-            let seconds_per_year: u256 = 31536000; // 365 days
-
-            let fixed_payment = (notional * fixed_rate * term_seconds.into())
-                / (Constants::BPS * seconds_per_year);
-            let floating_payment = (notional * projected_rate_bps * term_seconds.into())
-                / (Constants::BPS * seconds_per_year);
-
-            // PnL depends on swap side
-            match *swap.side {
-                SwapSide::Fixed => {
-                    // Fixed side: pays fixed, receives floating
-                    // Profit when floating > fixed
-                    if floating_payment >= fixed_payment {
-                        positive(floating_payment - fixed_payment)
-                    } else {
-                        negative(fixed_payment - floating_payment)
-                    }
-                },
-                SwapSide::Floating => {
-                    // Floating side: pays floating, receives fixed
-                    // Profit when fixed > floating
-                    if fixed_payment >= floating_payment {
-                        positive(fixed_payment - floating_payment)
-                    } else {
-                        negative(floating_payment - fixed_payment)
-                    }
-                },
+                // Track in protocol_fees
+                let current = self.protocol_fees.read(fee_token_addr);
+                self
+                    .protocol_fees
+                    .write(fee_token_addr, current + protocol_config.market_creation_fees);
             }
         }
     }
