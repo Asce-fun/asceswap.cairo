@@ -47,7 +47,7 @@ pub mod AccessRegistry {
     /// @param superAdmin
     #[constructor]
     fn constructor(ref self: ContractState, admin: ContractAddress) {
-        self.initialize(admin);
+        self._initialize(admin);
     }
 
     ////////////////////////////////
@@ -65,20 +65,6 @@ pub mod AccessRegistry {
 
     #[abi(embed_v0)]
     impl AccessExtraImpl of IAccessExtra<ContractState> {
-        fn initialize(ref self: ContractState, admin: ContractAddress) {
-            assert(!self.initialized.read(), 'Initializable: is initialized');
-            self.initialized.write(true);
-
-            // Access control
-            self.accessControl.initializer();
-
-            // grant super admin role
-            self.accessControl._grant_role(Roles::ADMIN_ROLE, admin);
-
-            // set all roles admin as super admin
-            self.accessControl.set_role_admin(Roles::ADMIN_ROLE, Roles::ADMIN_ROLE);
-        }
-
         fn set_role_admin(ref self: ContractState, role: felt252, admin_role: felt252) {
             self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
             self.accessControl.set_role_admin(role, admin_role);
@@ -88,6 +74,16 @@ pub mod AccessRegistry {
             self.accessControl.assert_only_role(Roles::ADMIN_ROLE);
             self.accessControl._grant_role(role, owner);
             self.accessControl.set_role_admin(role, role);
+        }
+    }
+    #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn _initialize(ref self: ContractState, admin: ContractAddress) {
+            assert(!self.initialized.read(), 'Initializable: is initialized');
+            self.initialized.write(true);
+            self.accessControl.initializer();
+            self.accessControl._grant_role(Roles::ADMIN_ROLE, admin);
+            self.accessControl.set_role_admin(Roles::ADMIN_ROLE, Roles::ADMIN_ROLE);
         }
     }
 }
