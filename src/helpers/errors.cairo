@@ -30,4 +30,5 @@ pub mod Errors {
     pub const TRANSFER_FROM_FAILED: felt252 = 'Token transferFrom failed';
     pub const LP_COOLDOWN_NOT_MET: felt252 = 'LP cooldown not met';
     pub const SWAP_EXPIRED_USE_SETTLE: felt252 = 'SWAP_EXPIRED_USE_SETTLE';
+    pub const MARKET_NOT_PAUSED: felt252 = 'Market not paused';
 }
