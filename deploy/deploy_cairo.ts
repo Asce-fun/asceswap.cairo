@@ -168,7 +168,8 @@ function toCallDataParams(p: MarketParamsJson) {
     liquidation_threshold_bps: { low: BigInt(p.liquidation_threshold_bps), high: 0n },
     initial_margin_multiplier_bps: { low: BigInt(p.initial_margin_multiplier_bps), high: 0n },
     min_margin_floor_bps: { low: BigInt(p.min_margin_floor_bps), high: 0n },
-    swap_term_seconds: BigInt(p.swap_term_seconds),
+    min_swap_term_seconds: BigInt(p.min_swap_term_seconds),
+    max_swap_term_seconds: BigInt(p.max_swap_term_seconds),
     min_hold_period_seconds: BigInt(p.min_hold_period_seconds),
     swap_fee_bps: { low: BigInt(p.swap_fee_bps), high: 0n },
     early_exit_fee_bps: { low: BigInt(p.early_exit_fee_bps), high: 0n },
@@ -205,7 +206,7 @@ async function createMarket(
   console.log(`  Collateral Token: ${collateralTokenAddress}`);
   console.log(`  Curator: ${curatorAddress}`);
   console.log(`  Initial Liquidity: ${initialLiquidity}`);
-  console.log(`  Term: ${marketParams.swap_term_seconds}s | Liq Threshold: ${marketParams.liquidation_threshold_bps} bps | Swap Fee: ${marketParams.swap_fee_bps} bps`);
+  console.log(`  Term: ${marketParams.min_swap_term_seconds}-${marketParams.max_swap_term_seconds}s | Liq Threshold: ${marketParams.liquidation_threshold_bps} bps | Swap Fee: ${marketParams.swap_fee_bps} bps`);
 
   // Approve the Asceswap contract to spend collateral tokens for initial liquidity
   console.log(`  Approving tokens for initial liquidity...`);
@@ -262,7 +263,8 @@ interface MarketParamsJson {
   liquidation_threshold_bps: number;
   initial_margin_multiplier_bps: number;
   min_margin_floor_bps: number;
-  swap_term_seconds: number;
+  min_swap_term_seconds: number;
+  max_swap_term_seconds: number;
   min_hold_period_seconds: number;
   swap_fee_bps: number;
   early_exit_fee_bps: number;

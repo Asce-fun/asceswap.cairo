@@ -1,6 +1,6 @@
 use asceswap_cairo::helpers::constants::Constants;
 use asceswap_cairo::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
-use asceswap_cairo::types::asce_swap::{MarketStatus, SwapSide, SwapStatus};
+use asceswap_cairo::types::asce_swap::{MarketStatus, SwapConfig, SwapSide, SwapStatus};
 use core::num::traits::Zero;
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
@@ -222,7 +222,7 @@ fn setup_market_with_liquidity() -> (
 fn test_get_swap_quote() {
     let (asceswap, _, _, pair_id) = setup_market_with_liquidity();
 
-    let quote = asceswap.get_swap_quote(pair_id, SwapSide::Fixed, 10000000);
+    let quote = asceswap.get_swap_quote(pair_id, SwapSide::Fixed, 10000000, 2592000);
     assert(quote.base_rate_bps > 0, 'has rate');
     assert(quote.required_collateral > 0, 'has collateral');
 }
@@ -241,7 +241,17 @@ fn test_buy_swap_fixed() {
 
     // Buy swap
     start_cheat_caller_address(asceswap.contract_address, Helper::user1());
-    let swap_id = asceswap.buy_swap(pair_id, SwapSide::Fixed, notional, collateral, 10000);
+    let swap_id = asceswap
+        .buy_swap(
+            SwapConfig {
+                pair_id,
+                side: SwapSide::Fixed,
+                notional,
+                collateral,
+                max_rate_bps: 10000,
+                term_seconds: 2592000,
+            },
+        );
     stop_cheat_caller_address(asceswap.contract_address);
 
     assert(swap_id == 1, 'first swap');
@@ -262,7 +272,17 @@ fn test_settle_swap() {
     stop_cheat_caller_address(erc20.contract_address);
 
     start_cheat_caller_address(asceswap.contract_address, Helper::user1());
-    let swap_id = asceswap.buy_swap(pair_id, SwapSide::Fixed, 10000000, collateral, 10000);
+    let swap_id = asceswap
+        .buy_swap(
+            SwapConfig {
+                pair_id,
+                side: SwapSide::Fixed,
+                notional: 10000000,
+                collateral,
+                max_rate_bps: 10000,
+                term_seconds: 2592000,
+            },
+        );
     stop_cheat_caller_address(asceswap.contract_address);
 
     // Advance past expiry
@@ -293,7 +313,17 @@ fn test_get_health_status() {
     stop_cheat_caller_address(erc20.contract_address);
 
     start_cheat_caller_address(asceswap.contract_address, Helper::user1());
-    let swap_id = asceswap.buy_swap(pair_id, SwapSide::Fixed, 10000000, collateral, 10000);
+    let swap_id = asceswap
+        .buy_swap(
+            SwapConfig {
+                pair_id,
+                side: SwapSide::Fixed,
+                notional: 10000000,
+                collateral,
+                max_rate_bps: 10000,
+                term_seconds: 2592000,
+            },
+        );
     stop_cheat_caller_address(asceswap.contract_address);
 
     let health = asceswap.get_health_status(swap_id);

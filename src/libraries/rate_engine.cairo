@@ -169,7 +169,8 @@ mod tests {
             liquidation_threshold_bps: 8000,
             initial_margin_multiplier_bps: 12000,
             min_margin_floor_bps: 2000,
-            swap_term_seconds: 2592000, // 30 days
+            min_swap_term_seconds: 2592000, // 30 days
+            max_swap_term_seconds: 2592000, // 30 days
             min_hold_period_seconds: 3600,
             swap_fee_bps: 50,
             early_exit_fee_bps: 100,
