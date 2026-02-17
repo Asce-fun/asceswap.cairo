@@ -46,6 +46,8 @@ pub mod Constants {
 
     pub const MAX_MARGIN_MULTIPLIER_BPS: u256 = 12500; //125%
 
+    // pub const MIN_SWAP_TERM_SECONDS: u64 = 8 * 3600; // 8 hours
+
 
     pub fn USDC() -> ContractAddress {
         contract_address_const::<

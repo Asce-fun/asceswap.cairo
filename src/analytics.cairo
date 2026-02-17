@@ -336,9 +336,9 @@ pub mod Analytics {
                 // Get quotes for both sides to show rates
                 // Use min_notional as a reference amount
                 let fixed_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional);
+                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional, market.params.min_swap_term_seconds);
                 let floating_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional);
+                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional, market.params.min_swap_term_seconds);
 
                 let market_for_trading = MarketForTrading {
                     pair_id,
@@ -353,7 +353,8 @@ pub mod Analytics {
                     total_liquidity: pool_analytics.total_value,
                     total_swaps_created: market.total_swaps_created,
                     active_swap_count: market.active_swap_count,
-                    swap_term_seconds: market.params.swap_term_seconds,
+                    min_swap_term_seconds: market.params.min_swap_term_seconds,
+                    max_swap_term_seconds: market.params.max_swap_term_seconds,
                     min_notional: market.params.min_notional,
                     max_notional_per_swap: market.params.max_notional_per_swap,
                     swap_fee_bps: market.params.swap_fee_bps,

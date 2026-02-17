@@ -2,7 +2,7 @@ use starknet::ContractAddress;
 use crate::types::asce_swap::{
     HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
     ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard, UserLpSummary,
-    UserSwapSummary,
+    UserSwapSummary,SwapConfig
 };
 
 #[starknet::interface]
@@ -44,11 +44,7 @@ pub trait IAsceSwap<TContractState> {
     /// Buy a new swap position
     fn buy_swap(
         ref self: TContractState,
-        pair_id: felt252,
-        side: SwapSide,
-        notional: u256,
-        collateral: u256,
-        max_rate_bps: u256,
+        config: SwapConfig
     ) -> u256;
 
     /// Settle an expired swap
@@ -68,7 +64,7 @@ pub trait IAsceSwap<TContractState> {
 
     /// Get swap quote (preview rate and requirements)
     fn get_swap_quote(
-        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256,
+        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256, term_seconds: u64,
     ) -> SwapQuote;
 
     fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;

@@ -15,7 +15,7 @@ pub mod SwapManagerComponent {
     use crate::libraries::settlement_engine::SettlementEngine;
     use crate::types::asce_swap::{
         HealthStatus, LpPool, MarketPair, MarketParams, RateIndex, SettlementResult, SettlementType,
-        SignedValue, Swap, SwapQuote, SwapSide, SwapStatus,
+        SignedValue, Swap, SwapQuote, SwapSide, SwapStatus,SwapConfig
     };
 
     #[storage]
@@ -112,21 +112,29 @@ pub mod SwapManagerComponent {
         /// Returns (swap_id, updated_pool, lp_fee_portion, protocol_portion)
         fn buy_swap(
             ref self: ComponentState<TContractState>,
-            pair_id: felt252,
-            side: SwapSide,
-            notional: u256,
-            collateral: u256,
-            max_rate_bps: u256,
+            config: @SwapConfig,
             caller: ContractAddress,
             market: @MarketPair,
             oracle_rate: u256,
             protocol_fee_share_bps: u256,
         ) -> (u256, LpPool, u256, u256) {
+            let pair_id = *config.pair_id;
+            let side = *config.side;
+            let notional = *config.notional;
+            let collateral = *config.collateral;
+            let max_rate_bps = *config.max_rate_bps;
+            let term_seconds = *config.term_seconds;
+
             // Validate
             assert(notional >= *market.params.min_notional, Errors::BELOW_MIN_NOTIONAL);
             assert(notional <= *market.params.max_notional_per_swap, Errors::ABOVE_MAX_NOTIONAL);
-            //@audit: shouldn't collateral amount be a factor of notional amount ?
-            // assert(collateral > 0, Errors::ZERO_AMOUNT);
+
+            // Validate term is within market bounds
+            assert(
+                term_seconds >= *market.params.min_swap_term_seconds
+                    && term_seconds <= *market.params.max_swap_term_seconds,
+                'Term out of bounds',
+            );
 
             assert(
                 notional <= collateral * *market.params.initial_margin_multiplier_bps,
@@ -144,7 +152,6 @@ pub mod SwapManagerComponent {
             assert(final_rate <= max_rate_bps, Errors::RATE_EXCEEDS_MAX);
 
             // Calculate requirements
-            let term_seconds = *market.params.swap_term_seconds;
             // total margin required to lock (notional * rate * terms * buffer)
             let required_margin = HealthCal::calculate_required_margin(
                 notional, final_rate, term_seconds, *market.params.initial_margin_multiplier_bps,
@@ -396,6 +403,7 @@ pub mod SwapManagerComponent {
             side: SwapSide,
             notional: u256,
             oracle_rate: u256,
+            term_seconds: u64,
         ) -> SwapQuote {
             let (final_rate, adjustment, is_positive) = RateEngine::calculate_swap_rate(
                 pool, params, side, oracle_rate,
@@ -404,7 +412,7 @@ pub mod SwapManagerComponent {
             let required_collateral = HealthCal::calculate_required_margin(
                 notional,
                 final_rate,
-                *params.swap_term_seconds,
+                term_seconds,
                 *params.initial_margin_multiplier_bps,
             );
 

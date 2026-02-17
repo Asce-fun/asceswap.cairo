@@ -123,7 +123,7 @@ pub mod MarketManagerComponent {
                         rate_oracle,
                         collateral_token,
                         curator,
-                        swap_term_seconds: params.swap_term_seconds,
+                        swap_term_seconds: params.min_swap_term_seconds,
                         timestamp: current_time,
                     },
                 );
@@ -170,8 +170,8 @@ pub mod MarketManagerComponent {
                 Errors::INVALID_PARAMS,
             );
             assert(
-                *params.swap_term_seconds >= Constants::MIN_SWAP_TERM_SECONDS
-                    && *params.swap_term_seconds <= Constants::MAX_SWAP_TERM_SECONDS,
+                *params.min_swap_term_seconds >= Constants::MIN_SWAP_TERM_SECONDS
+                    && *params.max_swap_term_seconds <= Constants::MAX_SWAP_TERM_SECONDS,
                 Errors::INVALID_PARAMS,
             );
             assert(*params.swap_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);

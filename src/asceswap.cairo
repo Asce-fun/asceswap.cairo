@@ -22,8 +22,8 @@ pub mod Asceswap {
     use crate::interfaces::asce_swap::IAsceSwap;
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, MarketStatus,
-        PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
-        UserDashboard, UserLpSummary, UserSwapSummary,
+        PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapConfig, SwapQuote,
+        SwapSide, UserDashboard, UserLpSummary, UserSwapSummary,
     };
 
     // Component declarations
@@ -83,11 +83,8 @@ pub mod Asceswap {
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
         protocol_fees: Map<ContractAddress, u256>,
-        // ============================================================
+
         // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
-        // This pattern works for MVP but doesn't scale to 1000s of positions.
-        // For testnet only. Use events + indexer in production.
-        // ============================================================
         // User swap tracking: (user, index) -> swap_id
         user_swap_ids: Map<(ContractAddress, u32), u256>,
         user_swap_count: Map<ContractAddress, u32>,
@@ -162,7 +159,7 @@ pub mod Asceswap {
         self.erc721.initializer("AsceSwap V2 Position", "ASCE-V2", "");
 
         // Initialize protocol config
-        let config = ProtocolConfig {
+    let config = ProtocolConfig {
             treasury,
             protocol_fee_share_bps: 2000, // 20% of fees to protocol
             min_first_lp_deposit: Constants::DEFAULT_MIN_FIRST_LP_DEPOSIT,
@@ -322,15 +319,12 @@ pub mod Asceswap {
 
         fn buy_swap(
             ref self: ContractState,
-            pair_id: felt252,
-            side: SwapSide,
-            notional: u256,
-            collateral: u256,
-            max_rate_bps: u256,
+            config: SwapConfig
         ) -> u256 {
             self.reentrancy.start();
             self._assert_not_paused();
-
+            let pair_id = config.pair_id;
+            let collateral = config.collateral;
             let mut market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
 
@@ -344,28 +338,24 @@ pub mod Asceswap {
             self
                 .emit(
                     RateIndexUpdated {
-                        pair_id,
+                        pair_id: pair_id,
                         new_rate_bps: oracle_rate,
                         cumulative_rate_time: market.rate_index.cumulative_rate_time,
                         timestamp: current_time,
                     },
                 );
 
-            let config = self.protocol_config.read();
+            let protocol_config = self.protocol_config.read();
 
             // Execute swap via component
             let (swap_id, updated_pool, _lp_fee, protocol_portion) = self
                 .swap_manager
                 .buy_swap(
-                    pair_id,
-                    side,
-                    notional,
-                    collateral,
-                    max_rate_bps,
+                    @config,
                     caller,
                     @market,
                     oracle_rate,
-                    config.protocol_fee_share_bps,
+                    protocol_config.protocol_fee_share_bps,
                 );
 
             // Transfer collateral using SafeERC20
@@ -516,13 +506,13 @@ pub mod Asceswap {
         }
 
         fn get_swap_quote(
-            self: @ContractState, pair_id: felt252, side: SwapSide, notional: u256,
+            self: @ContractState, pair_id: felt252, side: SwapSide, notional: u256, term_seconds: u64,
         ) -> SwapQuote {
             let market = self.market_manager._get_market(pair_id);
             let (oracle_rate, _) = self.market_manager._get_oracle_rate(market.rate_oracle);
             self
                 .swap_manager
-                .get_swap_quote(@market.pool, @market.params, side, notional, oracle_rate)
+                .get_swap_quote(@market.pool, @market.params, side, notional, oracle_rate, term_seconds)
         }
 
         fn get_health_status(self: @ContractState, swap_id: u256) -> HealthStatus {
