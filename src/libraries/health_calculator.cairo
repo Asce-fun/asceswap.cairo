@@ -86,11 +86,17 @@ pub mod HealthCal {
         mul_div_down(initial_margin, effective_factor, Constants::BPS)
     }
     /// Calculate required margin for a swap
+    /// Uses max(rate, min_margin_rate_bps) to prevent tiny margins on low-rate markets
     /// required = max_exposure × initial_margin_multiplier / BPS
     pub fn calculate_required_margin(
-        notional: u256, rate_bps: u256, term_seconds: u64, initial_margin_multiplier_bps: u256,
+        notional: u256,
+        rate_bps: u256,
+        term_seconds: u64,
+        initial_margin_multiplier_bps: u256,
+        min_margin_rate_bps: u256,
     ) -> u256 {
-        let max_exposure = calculate_max_exposure(notional, rate_bps, term_seconds);
+        let effective_rate = Utils::max(rate_bps, min_margin_rate_bps);
+        let max_exposure = calculate_max_exposure(notional, effective_rate, term_seconds);
         // Round UP - require more margin for safety
         mul_div_up(max_exposure, initial_margin_multiplier_bps, Constants::BPS)
     }
@@ -226,34 +232,69 @@ mod tests {
 
     #[test]
     fn test_calculate_required_margin_basic() {
-        // 1,000,000 notional, 5% rate, 1 year, 120% multiplier
+        // 1,000,000 notional, 5% rate, 1 year, 110% multiplier, no floor
         // max_exposure = 50,000
-        // required = 50,000 * 1.2 = 60,000
+        // required = 50,000 * 1.1 = 55,000
         let margin = HealthCal::calculate_required_margin(
-            1000000, 500, Constants::SECONDS_PER_YEAR, 12000,
+            1000000, 500, Constants::SECONDS_PER_YEAR, 11000, 0,
         );
-        assert(margin == 60000, 'basic margin');
+        assert(margin == 55000, 'basic margin');
     }
 
     #[test]
     fn test_calculate_required_margin_30_days() {
-        // 1,000,000 notional, 10% rate, 30 days, 120% multiplier
+        // 1,000,000 notional, 10% rate, 30 days, 110% multiplier, no floor
         let thirty_days: u64 = 2592000;
-        let margin = HealthCal::calculate_required_margin(1000000, 1000, thirty_days, 12000);
-        // max_exposure ≈ 8,219, required ≈ 9,863
-        assert(margin > 9000 && margin < 10500, 'margin 30 days');
+        let margin = HealthCal::calculate_required_margin(1000000, 1000, thirty_days, 11000, 0);
+        // max_exposure ≈ 8,219, required ≈ 9,041
+        assert(margin > 8500 && margin < 9500, 'margin 30 days');
     }
 
     #[test]
     fn test_calculate_required_margin_high_multiplier() {
-        // Same as basic but 150% multiplier
+        // Same as basic but 110% multiplier (max allowed), no floor
         let margin = HealthCal::calculate_required_margin(
-            1000000, 500, Constants::SECONDS_PER_YEAR, 15000,
+            1000000, 500, Constants::SECONDS_PER_YEAR, 11000, 0,
         );
-        // 50,000 * 1.5 = 75,000
-        assert(margin == 75000, 'high multiplier');
+        // 50,000 * 1.1 = 55,000
+        assert(margin == 55000, 'high multiplier');
     }
 
+    #[test]
+    fn test_calculate_required_margin_floor_no_effect() {
+        // Rate 5% (500) > floor 2% (200) → floor doesn't bind
+        let margin_with_floor = HealthCal::calculate_required_margin(
+            1000000, 500, Constants::SECONDS_PER_YEAR, 11000, 200,
+        );
+        let margin_without_floor = HealthCal::calculate_required_margin(
+            1000000, 500, Constants::SECONDS_PER_YEAR, 11000, 0,
+        );
+        assert(margin_with_floor == margin_without_floor, 'floor no effect');
+    }
+
+    #[test]
+    fn test_calculate_required_margin_floor_binds() {
+        // Rate 0.35% (35) < floor 2% (200) → margin calculated on 2%
+        // Without floor: 1M * 0.35% * 1yr * 1.1 = 3,850
+        // With floor:    1M * 2%    * 1yr * 1.1 = 22,000
+        let margin_low_rate = HealthCal::calculate_required_margin(
+            1000000, 35, Constants::SECONDS_PER_YEAR, 11000, 200,
+        );
+        let margin_at_floor = HealthCal::calculate_required_margin(
+            1000000, 200, Constants::SECONDS_PER_YEAR, 11000, 0,
+        );
+        assert(margin_low_rate == margin_at_floor, 'floor binds');
+    }
+
+    #[test]
+    fn test_calculate_required_margin_zero_rate_with_floor() {
+        // Rate 0% but floor 2% → margin still calculated on 2%
+        let margin = HealthCal::calculate_required_margin(
+            1000000, 0, Constants::SECONDS_PER_YEAR, 11000, 200,
+        );
+        // 1M * 2% * 1yr * 1.1 = 22,000
+        assert(margin == 22000, 'zero rate floor');
+    }
 
     #[test]
     fn test_calculate_max_exposure() {

@@ -154,7 +154,11 @@ pub mod SwapManagerComponent {
             // Calculate requirements
             // total margin required to lock (notional * rate * terms * buffer)
             let required_margin = HealthCal::calculate_required_margin(
-                notional, final_rate, term_seconds, *market.params.initial_margin_multiplier_bps,
+                notional,
+                final_rate,
+                term_seconds,
+                *market.params.initial_margin_multiplier_bps,
+                *market.params.min_margin_rate_bps,
             );
 
             // LP must lock same amount
@@ -414,6 +418,7 @@ pub mod SwapManagerComponent {
                 final_rate,
                 term_seconds,
                 *params.initial_margin_multiplier_bps,
+                *params.min_margin_rate_bps,
             );
 
             SwapQuote {

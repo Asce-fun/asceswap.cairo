@@ -39,6 +39,7 @@
         "max_rate_change_per_update_bps": 500,
         "min_rate_bps": 0,
         "max_rate_bps": 50000,
+        "min_margin_rate_bps": 300,
         "is_lp_permissioned": false
       }
     },
@@ -49,7 +50,7 @@
       "initial_liquidity": 100000000000,
       "params": {
         "liquidation_threshold_bps": 8000,
-        "initial_margin_multiplier_bps": 12000,
+        "initial_margin_multiplier_bps": 11000,
         "min_margin_floor_bps": 2000,
         "min_swap_term_seconds": 2592000,
         "max_swap_term_seconds": 25920000,
@@ -66,6 +67,7 @@
         "max_rate_change_per_update_bps": 1000,
         "min_rate_bps": 0,
         "max_rate_bps": 100000,
+        "min_margin_rate_bps": 200,
         "is_lp_permissioned": false
       }
     },
@@ -76,7 +78,7 @@
       "initial_liquidity": 100000000000,
       "params": {
         "liquidation_threshold_bps": 7500,
-        "initial_margin_multiplier_bps": 12500,
+        "initial_margin_multiplier_bps": 11000,
         "min_margin_floor_bps": 2500,
         "min_swap_term_seconds": 1296000,
         "max_swap_term_seconds": 12960000,
@@ -93,6 +95,7 @@
         "max_rate_change_per_update_bps": 1500,
         "min_rate_bps": 0,
         "max_rate_bps": 200000,
+        "min_margin_rate_bps": 500,
         "is_lp_permissioned": false
       }
     },
@@ -120,6 +123,7 @@
         "max_rate_change_per_update_bps": 300,
         "min_rate_bps": 0,
         "max_rate_bps": 50000,
+        "min_margin_rate_bps": 300,
         "is_lp_permissioned": false
       }
     },
@@ -130,7 +134,7 @@
       "initial_liquidity": 100000000000,
       "params": {
         "liquidation_threshold_bps": 8200,
-        "initial_margin_multiplier_bps": 11500,
+        "initial_margin_multiplier_bps": 11000,
         "min_margin_floor_bps": 1800,
         "min_swap_term_seconds": 2592000,
         "max_swap_term_seconds": 25920000,
@@ -147,6 +151,7 @@
         "max_rate_change_per_update_bps": 600,
         "min_rate_bps": 0,
         "max_rate_bps": 50000,
+        "min_margin_rate_bps": 300,
         "is_lp_permissioned": false
       }
     },
@@ -157,7 +162,7 @@
       "initial_liquidity": 100000000000,
       "params": {
         "liquidation_threshold_bps": 8000,
-        "initial_margin_multiplier_bps": 12000,
+        "initial_margin_multiplier_bps": 11000,
         "min_margin_floor_bps": 2000,
         "min_swap_term_seconds": 5184000,
         "max_swap_term_seconds": 51840000,
@@ -174,6 +179,7 @@
         "max_rate_change_per_update_bps": 800,
         "min_rate_bps": 0,
         "max_rate_bps": 80000,
+        "min_margin_rate_bps": 200,
         "is_lp_permissioned": false
       }
     }

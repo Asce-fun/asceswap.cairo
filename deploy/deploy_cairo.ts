@@ -183,6 +183,7 @@ function toCallDataParams(p: MarketParamsJson) {
     max_rate_change_per_update_bps: { low: BigInt(p.max_rate_change_per_update_bps), high: 0n },
     min_rate_bps: { low: BigInt(p.min_rate_bps), high: 0n },
     max_rate_bps: { low: BigInt(p.max_rate_bps), high: 0n },
+    min_margin_rate_bps: { low: BigInt(p.min_margin_rate_bps), high: 0n },
     is_lp_permissioned: p.is_lp_permissioned,
   };
 }
@@ -278,6 +279,7 @@ interface MarketParamsJson {
   max_rate_change_per_update_bps: number;
   min_rate_bps: number;
   max_rate_bps: number;
+  min_margin_rate_bps: number;
   is_lp_permissioned: boolean;
 }
 

@@ -58,8 +58,10 @@ pub struct MarketParams {
     pub max_rate_change_per_update_bps: u256, // Rate change limit
     pub min_rate_bps: u256, // Floor (can be 0)
     pub max_rate_bps: u256, // Ceiling (e.g., 1000000 = 10000%)
+    ///Margin Rate Floor
+    pub min_margin_rate_bps: u256, // Rate floor for margin calc (e.g., 200 = 2%)
     //Lp type
-    pub is_lp_permissioned: bool // is Lp provisiong open 
+    pub is_lp_permissioned: bool // is Lp provisiong open
 }
 
 

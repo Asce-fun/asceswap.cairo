@@ -167,7 +167,7 @@ mod tests {
     fn default_market_params() -> MarketParams {
         MarketParams {
             liquidation_threshold_bps: 8000,
-            initial_margin_multiplier_bps: 12000,
+            initial_margin_multiplier_bps: 11000,
             min_margin_floor_bps: 2000,
             min_swap_term_seconds: 2592000, // 30 days
             max_swap_term_seconds: 2592000, // 30 days
@@ -184,6 +184,7 @@ mod tests {
             max_rate_change_per_update_bps: 1000, // 10% max change
             min_rate_bps: 0,
             max_rate_bps: 100000,
+            min_margin_rate_bps: 0,
             is_lp_permissioned: false,
         }
     }

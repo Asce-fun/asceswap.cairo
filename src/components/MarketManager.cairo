@@ -191,6 +191,10 @@ pub mod MarketManagerComponent {
                         .initial_margin_multiplier_bps <= Constants::MAX_MARGIN_MULTIPLIER_BPS,
                 Errors::INVALID_PARAMS,
             );
+            assert(
+                *params.min_margin_rate_bps <= *params.max_rate_bps,
+                Errors::INVALID_PARAMS,
+            );
         }
 
         /// Get oracle rate
