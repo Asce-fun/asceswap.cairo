@@ -111,7 +111,8 @@ pub struct MarketForTrading {
     pub total_swaps_created: u256,
     pub active_swap_count: u256,
     // Term info
-    pub swap_term_seconds: u64,
+    pub min_swap_term_seconds: u64,
+    pub max_swap_term_seconds: u64,
     pub min_notional: u256,
     pub max_notional_per_swap: u256,
     // Fee info

@@ -40,7 +40,8 @@ pub struct MarketParams {
     pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
     pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
     ///Term Parameter
-    pub swap_term_seconds: u64, // Duration of swaps
+    pub min_swap_term_seconds: u64,    // e.g., should kept minimum of 8 hours for tradiFi markets
+    pub max_swap_term_seconds: u64,    // e.g., 1 year
     pub min_hold_period_seconds: u64, // Before early exit allowed
     /// Fee Parameters (in BPS)
     pub swap_fee_bps: u256, // On collateral at entry
@@ -143,6 +144,19 @@ pub struct ProtocolConfig {
     pub market_creation_fees: u256,
     pub fee_token: ContractAddress,
 }
+
+
+/// Swap rate quote
+#[derive(Drop, Copy, Serde)]
+pub struct SwapConfig {
+    pub pair_id: felt252,
+    pub side: SwapSide,
+    pub notional: u256,
+    pub collateral: u256,
+    pub max_rate_bps: u256,
+    pub term_seconds:u64
+}
+
 
 
 /// Swap rate quote
