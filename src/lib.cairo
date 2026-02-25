@@ -43,5 +43,5 @@ pub mod analytics;
 
 pub mod asceswap;
 
-// Mock contracts for testnet/mainnet fork testing
-pub mod mocks;
+// Enhanced mock contracts for testnet deployment (faucet tokens + rate oracles)
+pub mod mock;
