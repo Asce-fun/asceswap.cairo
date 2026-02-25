@@ -1,0 +1,78 @@
+{
+  "network": "https://starknet-sepolia.infura.io/v3/44bdf2d1c8594cc9b16832398af754d7",
+  "timestamp": "2026-02-19T10:26:12.129Z",
+  "deployer": "0x02c402cda5fa6c196c87B2282F92CAcF1194e353a279ed9a82141AB2F6262f7A",
+  "contracts": {
+    "accessRegistry": "0x3650165a61e66be5453007539e4d94311c59ab4883dae1f5bfd45beb664ab51",
+    "asceswap": "0x601fd19cd7a40c57c40df16100dd6e588a2d4e28ec0c8c8be456244ae5c5e32",
+    "analytics": "0x2675d1e9e088d2bf9c69109b65e18cc846c0b96e1d2560e575035de8fc0c893"
+  },
+  "tokens": {
+    "mockUSDC": "0x6a451c2ac33a52421cfb6d28bd21452bdaf57286d09b18959b590731ca66c6",
+    "mockBTC": "0x4e6ebe4e7006a642023926900823e15f9b7e2c4bf88231c7359a556046f7b95",
+    "mockSTRK": "0x26d0692294e2fa352e2ff60570d940e06d673d7a8ea8abf2eebe8776d1764bb"
+  },
+  "markets": [
+    {
+      "pairId": 1,
+      "oracleName": "BTC Funding Rate",
+      "oracleAddress": "0x33f64b08fee62e515066c62adae9f864a0cd2bd380eca50eef930fedb972722",
+      "collateral": "mockBTC",
+      "collateralTokenAddress": "0x4e6ebe4e7006a642023926900823e15f9b7e2c4bf88231c7359a556046f7b95",
+      "initialRateBps": 1000,
+      "initialLiquidity": "100000000",
+      "shares": "99999000"
+    },
+    {
+      "pairId": 2,
+      "oracleName": "STRK Staking Yield",
+      "oracleAddress": "0x4f054dc7fc84e1b3c4e3575eaae78acee0c63e6057547d300b6c9ebe9c4ee51",
+      "collateral": "mockSTRK",
+      "collateralTokenAddress": "0x26d0692294e2fa352e2ff60570d940e06d673d7a8ea8abf2eebe8776d1764bb",
+      "initialRateBps": 800,
+      "initialLiquidity": "10000000000000000000000",
+      "shares": "9999999999999999999000"
+    },
+    {
+      "pairId": 3,
+      "oracleName": "Troves xWBTC Supply Rate",
+      "oracleAddress": "0x2a73bf6c220c3ae3030500fefe13865f5e57e8dec84889eb7490794d6b6f5e6",
+      "collateral": "mockBTC",
+      "collateralTokenAddress": "0x4e6ebe4e7006a642023926900823e15f9b7e2c4bf88231c7359a556046f7b95",
+      "initialRateBps": 300,
+      "initialLiquidity": "100000000",
+      "shares": "99999000"
+    },
+    {
+      "pairId": 4,
+      "oracleName": "US SOFR Rate",
+      "oracleAddress": "0xba6cb4064d1600632e5e71c4ca829c8931586bc572a01eead5fb6999018eb1",
+      "collateral": "mockUSDC",
+      "collateralTokenAddress": "0x6a451c2ac33a52421cfb6d28bd21452bdaf57286d09b18959b590731ca66c6",
+      "initialRateBps": 430,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    },
+    {
+      "pairId": 5,
+      "oracleName": "Ekubo STRK/USDC Pool Rate",
+      "oracleAddress": "0x5a780d781d5effe4fe9d977606aeb499d5dc161b677487838e4b714111c457e",
+      "collateral": "mockSTRK",
+      "collateralTokenAddress": "0x26d0692294e2fa352e2ff60570d940e06d673d7a8ea8abf2eebe8776d1764bb",
+      "initialRateBps": 1200,
+      "initialLiquidity": "10000000000000000000000",
+      "shares": "9999999999999999999000"
+    },
+    {
+      "pairId": 6,
+      "oracleName": "US Real Estate Cap Rate",
+      "oracleAddress": "0x3637e03bc25e4e33fb213875e26c6e084b2fc30766cbb36d737edaeeec00197",
+      "collateral": "mockUSDC",
+      "collateralTokenAddress": "0x6a451c2ac33a52421cfb6d28bd21452bdaf57286d09b18959b590731ca66c6",
+      "initialRateBps": 550,
+      "initialLiquidity": "100000000000",
+      "shares": "99999999000"
+    }
+  ],
+  "upgradeClassHash": "0x11b85515ccd147a2c5c8e76c5034427465bd3911897a021b27b37e9e8148fd2"
+}
