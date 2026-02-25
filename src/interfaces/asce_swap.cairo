@@ -20,6 +20,12 @@ pub trait IAsceSwap<TContractState> {
     /// Pause a market
     fn pause_market(ref self: TContractState, pair_id: felt252);
 
+    /// Update a market's oracle address (admin only)
+    fn update_market_oracle(ref self: TContractState, pair_id: felt252, new_oracle: ContractAddress);
+
+    /// Update a market's params (admin only)
+    fn update_market_params(ref self: TContractState, pair_id: felt252, params: MarketParams);
+
     ///Market Creation Process
     fn set_premission_less_flag(ref self: TContractState, flag: bool);
 

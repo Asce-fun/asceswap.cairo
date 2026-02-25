@@ -23,7 +23,7 @@ pub mod Asceswap {
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, MarketStatus,
         PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
-        UserDashboard, UserLpSummary, UserSwapSummary,
+        SwapStatus, UserDashboard, UserLpSummary, UserSwapSummary,
     };
 
     // Component declarations
@@ -254,6 +254,49 @@ pub mod Asceswap {
         fn unpause_market(ref self: ContractState, pair_id: felt252) {
             self.security.assert_admin_role();
             self.market_manager._unpause_market(pair_id);
+        }
+
+        fn update_market_oracle(
+            ref self: ContractState, pair_id: felt252, new_oracle: ContractAddress,
+        ) {
+            self.security.assert_admin_role();
+            assert(!new_oracle.is_zero(), Errors::ZERO_ADDRESS);
+
+            let mut market = self.market_manager._get_market(pair_id);
+            assert(market.status != MarketStatus::Closed, 'Market closed');
+
+            // Validate new oracle returns valid data
+            let (rate, timestamp) = self.market_manager._get_oracle_rate(new_oracle);
+            let current_time = get_block_timestamp();
+            assert(current_time >= timestamp, Errors::ORACLE_INVALID_RATE);
+            assert(
+                current_time - timestamp <= market.params.max_oracle_staleness_seconds,
+                Errors::ORACLE_STALE,
+            );
+            assert(
+                rate >= market.params.min_rate_bps && rate <= market.params.max_rate_bps,
+                Errors::RATE_OUT_OF_BOUNDS,
+            );
+
+            // Update oracle address
+            market.rate_oracle = new_oracle;
+            self.market_manager._write_market(pair_id, market);
+        }
+
+        fn update_market_params(
+            ref self: ContractState, pair_id: felt252, params: MarketParams,
+        ) {
+            self.security.assert_admin_role();
+
+            let mut market = self.market_manager._get_market(pair_id);
+            assert(market.status != MarketStatus::Closed, 'Market closed');
+
+            // Validate new params against protocol bounds
+            self.market_manager._validate_market_params(@params);
+
+            // Update params
+            market.params = params;
+            self.market_manager._write_market(pair_id, market);
         }
 
         //LP OPERATIONS
@@ -680,9 +723,9 @@ pub mod Asceswap {
             let mut i: u32 = 0;
             while i < count {
                 let swap_id = self.user_swap_ids.read((user, i));
-                // Only include if user still owns it (handles transfers)
-                let owner = self.erc721.owner_of(swap_id);
-                if owner == user {
+                // Check swap status instead of NFT ownership (NFTs are burned on settle/liquidate)
+                let swap = self.swap_manager.get_swap(swap_id);
+                if swap.status != SwapStatus::Uninitialized {
                     swap_ids.append(swap_id);
                 }
                 i += 1;
