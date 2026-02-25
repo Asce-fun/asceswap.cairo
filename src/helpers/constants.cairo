@@ -37,12 +37,12 @@ pub mod Constants {
     /// Maximum rate bound (10000% APY)
     pub const MAX_RATE_BOUND_BPS: u256 = 1_000_000;
 
-    /// Maximum utilization per side (80%)
-    pub const MAX_UTILIZATION_CAP_BPS: u256 = 8_000;
+    /// Maximum utilization per side (85%)
+    pub const MAX_UTILIZATION_CAP_BPS: u256 = 8_500;
 
     pub const MIN_LP_COOLDOWN_SECONDS: u64 = 3_600;
 
-    pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 11000; // 110%
+    pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 10000; // 100%
 
     pub const MAX_MARGIN_MULTIPLIER_BPS: u256 = 12500; //125%
 
