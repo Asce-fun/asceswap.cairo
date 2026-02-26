@@ -8,3 +8,4 @@ UI_DESIGN.md
 deploy/node_modules
 deploy/.env
 deploy/deployment.json
+.DS_Store
