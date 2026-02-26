@@ -105,7 +105,7 @@ mod tests {
     use crate::helpers::constants::Constants;
     use super::HealthCal;
 
-    // ============ calculate_health_factor tests ============
+    //calculate_health_factor tests
 
     #[test]
     fn test_health_factor_healthy() {
@@ -149,7 +149,7 @@ mod tests {
         assert(health == Constants::BPS, '100% health');
     }
 
-    // ============ calculate_time_adjusted_margin tests ============
+    //calculate_time_adjusted_margin tests
 
     #[test]
     fn test_time_adjusted_margin_full_term() {
@@ -222,7 +222,7 @@ mod tests {
         assert(result == false, 'at threshold safe');
     }
 
-    // ============ calculate_required_margin tests ============
+    //calculate_required_margin tests
 
     #[test]
     fn test_calculate_required_margin_basic() {

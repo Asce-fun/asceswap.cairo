@@ -3,10 +3,6 @@ use crate::types::asce_swap::{
     MarketStatus, SignedValue, SwapSide, SwapStatus, UserLpSummary, UserSwapSummary,
 };
 
-// ============================================================
-// Dashboard Page Data (Single call for entire dashboard)
-// ============================================================
-
 /// Complete data for user dashboard page
 #[derive(Drop, Serde)]
 pub struct DashboardPageData {
@@ -36,10 +32,6 @@ pub struct DashboardPageData {
     pub has_expiring_soon: bool, // Within 24h
     pub expiring_soon_count: u32,
 }
-
-// ============================================================
-// LP Page Data (Single call for LP providers view)
-// ============================================================
 
 /// Market info for LP page listing
 #[derive(Drop, Copy, Serde)]
@@ -88,10 +80,6 @@ pub struct UserLpPositions {
     pub positions: Span<MarketForLp>,
 }
 
-// ============================================================
-// Markets Page Data (Single call for trading view)
-// ============================================================
-
 /// Market info for trading page
 #[derive(Drop, Copy, Serde)]
 pub struct MarketForTrading {
@@ -128,10 +116,6 @@ pub struct MarketsPageData {
     pub total_protocol_tvl: u256,
     pub total_active_swaps: u256,
 }
-
-// ============================================================
-// Single Swap Detail Page
-// ============================================================
 
 /// Complete data for viewing a single swap position
 #[derive(Drop, Serde)]
@@ -172,9 +156,6 @@ pub struct SwapDetailData {
     pub market_tvl: u256,
 }
 
-// ============================================================
-// Batch Scenario Analysis
-// ============================================================
 
 /// Scenario result with more context
 #[derive(Drop, Copy, Serde)]
