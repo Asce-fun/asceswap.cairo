@@ -20,12 +20,6 @@ pub trait IAsceSwap<TContractState> {
     /// Pause a market
     fn pause_market(ref self: TContractState, pair_id: felt252);
 
-    /// Update a market's oracle address (admin only)
-    fn update_market_oracle(ref self: TContractState, pair_id: felt252, new_oracle: ContractAddress);
-
-    /// Update a market's params (admin only)
-    fn update_market_params(ref self: TContractState, pair_id: felt252, params: MarketParams);
-
     ///Market Creation Process
     fn set_premission_less_flag(ref self: TContractState, flag: bool);
 
@@ -157,4 +151,13 @@ pub trait IAsceSwap<TContractState> {
     /// Get count of user's LP positions
     fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
     fn poke_rate_index(ref self: TContractState, pair_id: felt252);
+
+    /// Whitelist a token for use as collateral
+    fn whitelist_token(ref self: TContractState, token: ContractAddress);
+
+    /// Remove a token from whitelist
+    fn de_whitelist_token(ref self: TContractState, token: ContractAddress);
+
+    /// Check if a token is whitelisted
+    fn is_token_whitelisted(self: @TContractState, token: ContractAddress) -> bool;
 }

@@ -83,11 +83,6 @@ pub mod Asceswap {
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
         protocol_fees: Map<ContractAddress, u256>,
-        // ============================================================
-        // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
-        // This pattern works for MVP but doesn't scale to 1000s of positions.
-        // For testnet only. Use events + indexer in production.
-        // ============================================================
         // User swap tracking: (user, index) -> swap_id
         user_swap_ids: Map<(ContractAddress, u32), u256>,
         user_swap_count: Map<ContractAddress, u32>,
@@ -96,6 +91,8 @@ pub mod Asceswap {
         user_lp_count: Map<ContractAddress, u32>,
         // Track if user already has LP in a pair (to avoid duplicates)
         user_has_lp_in_pair: Map<(ContractAddress, felt252), bool>,
+
+        token_whitelisted: Map<ContractAddress,bool>,
     }
 
     #[event]
@@ -124,6 +121,8 @@ pub mod Asceswap {
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
         ProtocolConfigUpdated: ProtocolConfigUpdated,
         RateIndexUpdated: RateIndexUpdated,
+        TokenWhitelisted: TokenWhitelisted,
+        TokenDeWhitelisted:TokenDeWhitelisted
     }
 
     #[derive(Drop, starknet::Event)]
@@ -151,6 +150,18 @@ pub mod Asceswap {
         pub cumulative_rate_time: u256,
         pub timestamp: u64,
     }
+   #[derive(Drop, starknet::Event)]
+    pub struct TokenWhitelisted {
+        #[key]
+        pub token: ContractAddress,
+    }
+
+   #[derive(Drop, starknet::Event)]
+    pub struct TokenDeWhitelisted {
+        #[key]
+        pub token: ContractAddress,
+    }
+    
 
     #[constructor]
     fn constructor(
@@ -199,6 +210,9 @@ pub mod Asceswap {
             // Validations
             assert(!rate_oracle.is_zero(), Errors::ZERO_ADDRESS);
             assert(!collateral_token.is_zero(), Errors::ZERO_ADDRESS);
+            assert(
+                self.token_whitelisted.read(collateral_token), Errors::TOKEN_NOT_WHITELISTED,
+            );
             assert(!curator.is_zero(), Errors::ZERO_ADDRESS);
 
             let pair_id = self
@@ -256,49 +270,6 @@ pub mod Asceswap {
             self.market_manager._unpause_market(pair_id);
         }
 
-        fn update_market_oracle(
-            ref self: ContractState, pair_id: felt252, new_oracle: ContractAddress,
-        ) {
-            self.security.assert_admin_role();
-            assert(!new_oracle.is_zero(), Errors::ZERO_ADDRESS);
-
-            let mut market = self.market_manager._get_market(pair_id);
-            assert(market.status != MarketStatus::Closed, 'Market closed');
-
-            // Validate new oracle returns valid data
-            let (rate, timestamp) = self.market_manager._get_oracle_rate(new_oracle);
-            let current_time = get_block_timestamp();
-            assert(current_time >= timestamp, Errors::ORACLE_INVALID_RATE);
-            assert(
-                current_time - timestamp <= market.params.max_oracle_staleness_seconds,
-                Errors::ORACLE_STALE,
-            );
-            assert(
-                rate >= market.params.min_rate_bps && rate <= market.params.max_rate_bps,
-                Errors::RATE_OUT_OF_BOUNDS,
-            );
-
-            // Update oracle address
-            market.rate_oracle = new_oracle;
-            self.market_manager._write_market(pair_id, market);
-        }
-
-        fn update_market_params(
-            ref self: ContractState, pair_id: felt252, params: MarketParams,
-        ) {
-            self.security.assert_admin_role();
-
-            let mut market = self.market_manager._get_market(pair_id);
-            assert(market.status != MarketStatus::Closed, 'Market closed');
-
-            // Validate new params against protocol bounds
-            self.market_manager._validate_market_params(@params);
-
-            // Update params
-            market.params = params;
-            self.market_manager._write_market(pair_id, market);
-        }
-
         //LP OPERATIONS
 
         fn supply_lp_collateral(ref self: ContractState, pair_id: felt252, amount: u256) -> u256 {
@@ -324,7 +295,7 @@ pub mod Asceswap {
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
 
-            // TODO [MAINNET]: Remove - use indexer instead
+            // TODO : Remove - use indexer instead
             // Track user's LP pairs (only if first deposit to this pair)
             if !self.user_has_lp_in_pair.read((caller, pair_id)) {
                 let lp_index = self.user_lp_count.read(caller);
@@ -438,7 +409,7 @@ pub mod Asceswap {
             market.active_swap_count = market.active_swap_count + 1;
             self.market_manager._write_market(pair_id, market);
 
-            // TODO [MAINNET]: Remove - use indexer instead
+            // TODO : Remove - use indexer instead
             // Track user's swap IDs (for enumeration)
             let swap_index = self.user_swap_count.read(caller);
             self.user_swap_ids.write((caller, swap_index), swap_id);
@@ -605,6 +576,24 @@ pub mod Asceswap {
             self.emit(FlagSet { flag });
         }
 
+        fn whitelist_token(ref self: ContractState, token: ContractAddress) {
+            self.security.assert_admin_role();
+            assert(!token.is_zero(), Errors::ZERO_ADDRESS);
+            self.token_whitelisted.write(token, true);
+            self.emit(TokenWhitelisted { token });
+        }
+
+        fn de_whitelist_token(ref self: ContractState, token: ContractAddress) {
+            self.security.assert_admin_role();
+            assert(self.token_whitelisted.read(token), Errors::TOKEN_NOT_WHITELISTED);
+            self.token_whitelisted.write(token, false);
+            self.emit(TokenDeWhitelisted { token });
+        }
+
+        fn is_token_whitelisted(self: @ContractState, token: ContractAddress) -> bool {
+            self.token_whitelisted.read(token)
+        }
+
 
         fn exchange_rate_for_lp(self: @ContractState, pair_id: felt252) -> u256 {
             let market = self.market_manager._get_market(pair_id);
@@ -711,7 +700,7 @@ pub mod Asceswap {
         }
 
         // ============================================================
-        // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
+        // TODO: Replace with off-chain indexer (Apibara)
         // These functions iterate through on-chain arrays - O(n) reads.
         // For testnet/MVP only.
         // ============================================================

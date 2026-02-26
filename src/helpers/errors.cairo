@@ -31,4 +31,5 @@ pub mod Errors {
     pub const LP_COOLDOWN_NOT_MET: felt252 = 'LP cooldown not met';
     pub const SWAP_EXPIRED_USE_SETTLE: felt252 = 'SWAP_EXPIRED_USE_SETTLE';
     pub const MARKET_NOT_PAUSED: felt252 = 'Market not paused';
+    pub const TOKEN_NOT_WHITELISTED: felt252 = 'Token not whitelisted';
 }
