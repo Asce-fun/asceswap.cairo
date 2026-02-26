@@ -23,7 +23,7 @@ pub mod Asceswap {
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, MarketStatus,
         PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
-        UserDashboard, UserLpSummary, UserSwapSummary,
+        SwapStatus, UserDashboard, UserLpSummary, UserSwapSummary,
     };
 
     // Component declarations
@@ -83,11 +83,6 @@ pub mod Asceswap {
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
         protocol_fees: Map<ContractAddress, u256>,
-        // ============================================================
-        // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
-        // This pattern works for MVP but doesn't scale to 1000s of positions.
-        // For testnet only. Use events + indexer in production.
-        // ============================================================
         // User swap tracking: (user, index) -> swap_id
         user_swap_ids: Map<(ContractAddress, u32), u256>,
         user_swap_count: Map<ContractAddress, u32>,
@@ -96,6 +91,8 @@ pub mod Asceswap {
         user_lp_count: Map<ContractAddress, u32>,
         // Track if user already has LP in a pair (to avoid duplicates)
         user_has_lp_in_pair: Map<(ContractAddress, felt252), bool>,
+
+        token_whitelisted: Map<ContractAddress,bool>,
     }
 
     #[event]
@@ -124,6 +121,8 @@ pub mod Asceswap {
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
         ProtocolConfigUpdated: ProtocolConfigUpdated,
         RateIndexUpdated: RateIndexUpdated,
+        TokenWhitelisted: TokenWhitelisted,
+        TokenDeWhitelisted:TokenDeWhitelisted
     }
 
     #[derive(Drop, starknet::Event)]
@@ -151,6 +150,18 @@ pub mod Asceswap {
         pub cumulative_rate_time: u256,
         pub timestamp: u64,
     }
+   #[derive(Drop, starknet::Event)]
+    pub struct TokenWhitelisted {
+        #[key]
+        pub token: ContractAddress,
+    }
+
+   #[derive(Drop, starknet::Event)]
+    pub struct TokenDeWhitelisted {
+        #[key]
+        pub token: ContractAddress,
+    }
+    
 
     #[constructor]
     fn constructor(
@@ -199,6 +210,9 @@ pub mod Asceswap {
             // Validations
             assert(!rate_oracle.is_zero(), Errors::ZERO_ADDRESS);
             assert(!collateral_token.is_zero(), Errors::ZERO_ADDRESS);
+            assert(
+                self.token_whitelisted.read(collateral_token), Errors::TOKEN_NOT_WHITELISTED,
+            );
             assert(!curator.is_zero(), Errors::ZERO_ADDRESS);
 
             let pair_id = self
@@ -281,7 +295,7 @@ pub mod Asceswap {
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
 
-            // TODO [MAINNET]: Remove - use indexer instead
+            // TODO : Remove - use indexer instead
             // Track user's LP pairs (only if first deposit to this pair)
             if !self.user_has_lp_in_pair.read((caller, pair_id)) {
                 let lp_index = self.user_lp_count.read(caller);
@@ -395,7 +409,7 @@ pub mod Asceswap {
             market.active_swap_count = market.active_swap_count + 1;
             self.market_manager._write_market(pair_id, market);
 
-            // TODO [MAINNET]: Remove - use indexer instead
+            // TODO : Remove - use indexer instead
             // Track user's swap IDs (for enumeration)
             let swap_index = self.user_swap_count.read(caller);
             self.user_swap_ids.write((caller, swap_index), swap_id);
@@ -562,6 +576,24 @@ pub mod Asceswap {
             self.emit(FlagSet { flag });
         }
 
+        fn whitelist_token(ref self: ContractState, token: ContractAddress) {
+            self.security.assert_admin_role();
+            assert(!token.is_zero(), Errors::ZERO_ADDRESS);
+            self.token_whitelisted.write(token, true);
+            self.emit(TokenWhitelisted { token });
+        }
+
+        fn de_whitelist_token(ref self: ContractState, token: ContractAddress) {
+            self.security.assert_admin_role();
+            assert(self.token_whitelisted.read(token), Errors::TOKEN_NOT_WHITELISTED);
+            self.token_whitelisted.write(token, false);
+            self.emit(TokenDeWhitelisted { token });
+        }
+
+        fn is_token_whitelisted(self: @ContractState, token: ContractAddress) -> bool {
+            self.token_whitelisted.read(token)
+        }
+
 
         fn exchange_rate_for_lp(self: @ContractState, pair_id: felt252) -> u256 {
             let market = self.market_manager._get_market(pair_id);
@@ -668,7 +700,7 @@ pub mod Asceswap {
         }
 
         // ============================================================
-        // TODO [MAINNET]: Replace with off-chain indexer (Apibara)
+        // TODO: Replace with off-chain indexer (Apibara)
         // These functions iterate through on-chain arrays - O(n) reads.
         // For testnet/MVP only.
         // ============================================================
@@ -680,9 +712,9 @@ pub mod Asceswap {
             let mut i: u32 = 0;
             while i < count {
                 let swap_id = self.user_swap_ids.read((user, i));
-                // Only include if user still owns it (handles transfers)
-                let owner = self.erc721.owner_of(swap_id);
-                if owner == user {
+                // Check swap status instead of NFT ownership (NFTs are burned on settle/liquidate)
+                let swap = self.swap_manager.get_swap(swap_id);
+                if swap.status != SwapStatus::Uninitialized {
                     swap_ids.append(swap_id);
                 }
                 i += 1;

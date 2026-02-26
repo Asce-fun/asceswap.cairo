@@ -151,4 +151,13 @@ pub trait IAsceSwap<TContractState> {
     /// Get count of user's LP positions
     fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
     fn poke_rate_index(ref self: TContractState, pair_id: felt252);
+
+    /// Whitelist a token for use as collateral
+    fn whitelist_token(ref self: TContractState, token: ContractAddress);
+
+    /// Remove a token from whitelist
+    fn de_whitelist_token(ref self: TContractState, token: ContractAddress);
+
+    /// Check if a token is whitelisted
+    fn is_token_whitelisted(self: @TContractState, token: ContractAddress) -> bool;
 }
