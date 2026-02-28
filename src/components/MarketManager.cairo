@@ -33,7 +33,8 @@ pub mod MarketManagerComponent {
         pub rate_oracle: ContractAddress,
         pub collateral_token: ContractAddress,
         pub curator: ContractAddress,
-        pub swap_term_seconds: u64,
+        pub min_swap_term_seconds: u64,
+        pub max_swap_term_seconds: u64,
         pub timestamp: u64,
     }
 
@@ -79,10 +80,7 @@ pub mod MarketManagerComponent {
                 current_time - rate_timestamp <= params.max_oracle_staleness_seconds,
                 Errors::ORACLE_STALE,
             );
-            assert(
-                initial_rate >= params.min_rate_bps && initial_rate <= params.max_rate_bps,
-                Errors::RATE_OUT_OF_BOUNDS,
-            );
+            assert(initial_rate > 0, Errors::ORACLE_INVALID_RATE);
 
             /// Get token decimals
             let token = IERC20Dispatcher { contract_address: collateral_token };
@@ -114,7 +112,7 @@ pub mod MarketManagerComponent {
                 total_swaps_created: 0,
                 active_swap_count: 0,
             };
-
+            
             self.markets.write(pair_id, market);
             self
                 .emit(
@@ -123,7 +121,8 @@ pub mod MarketManagerComponent {
                         rate_oracle,
                         collateral_token,
                         curator,
-                        swap_term_seconds: params.swap_term_seconds,
+                        min_swap_term_seconds: params.min_swap_term_seconds,
+                        max_swap_term_seconds: params.max_swap_term_seconds,
                         timestamp: current_time,
                     },
                 );
@@ -161,36 +160,94 @@ pub mod MarketManagerComponent {
             self.markets.write(pair_id, market);
         }
 
+
         /// Validate market parameters
         fn _validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
+            
+            // liquidation_threshold_bps
             assert(
                 *params.liquidation_threshold_bps >= Constants::MIN_LIQUIDATION_THRESHOLD_BPS
                     && *params
                         .liquidation_threshold_bps <= Constants::MAX_LIQUIDATION_THRESHOLD_BPS,
                 Errors::INVALID_PARAMS,
             );
-            assert(
-                *params.swap_term_seconds >= Constants::MIN_SWAP_TERM_SECONDS
-                    && *params.swap_term_seconds <= Constants::MAX_SWAP_TERM_SECONDS,
-                Errors::INVALID_PARAMS,
-            );
-            assert(*params.swap_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
-            assert(*params.early_exit_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
-            assert(*params.liquidation_bonus_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
-            assert(*params.max_rate_bps <= Constants::MAX_RATE_BOUND_BPS, Errors::INVALID_PARAMS);
-            assert(
-                *params.max_utilization_bps <= Constants::MAX_UTILIZATION_CAP_BPS,
-                Errors::INVALID_PARAMS,
-            );
-            assert(*params.min_notional > 0, Errors::INVALID_PARAMS);
-            assert(*params.max_notional_per_swap >= *params.min_notional, Errors::INVALID_PARAMS);
-            assert(*params.min_margin_floor_bps <= Constants::BPS, Errors::INVALID_PARAMS);
+
+            //initial_margin_multiplier_bps
             assert(
                 *params.initial_margin_multiplier_bps >= Constants::MIN_MARGIN_MULTIPLIER_BPS
                     && *params
                         .initial_margin_multiplier_bps <= Constants::MAX_MARGIN_MULTIPLIER_BPS,
                 Errors::INVALID_PARAMS,
             );
+
+            // min_margin_floor_bps — lower + upper bound
+            assert(
+                *params.min_margin_floor_bps >= Constants::MIN_MARGIN_FLOOR_BPS
+                    && *params.min_margin_floor_bps <= Constants::BPS,
+                Errors::INVALID_PARAMS,
+            );
+
+            // min_swap_term_seconds — floor prevents flash swap attacks
+            assert(
+                *params.min_swap_term_seconds >= Constants::MIN_SWAP_TERM_SECONDS,
+                Errors::INVALID_PARAMS,
+            );
+
+            // min <= max swap term (cross-field)
+            assert(
+                *params.min_swap_term_seconds <= *params.max_swap_term_seconds,
+                Errors::INVALID_PARAMS,
+            );
+
+            // 7. min_hold_period_seconds — at least MIN_LP_COOLDOWN and <= min_swap_term
+            assert(
+                *params.min_hold_period_seconds > 0 
+                    && *params.min_hold_period_seconds <= *params.min_swap_term_seconds,
+                Errors::INVALID_PARAMS,
+            );
+
+            //swap_fee_bps
+            assert(*params.swap_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
+
+            //early_exit_fee_bps
+            assert(*params.early_exit_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
+
+            //liquidation_bonus_bps
+            assert(*params.liquidation_bonus_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
+
+            // base_fee_spread_bps — reasonable base spread
+            assert(*params.base_fee_spread_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
+
+            //demand_spread_factor — within protocol bounds
+            assert(
+                *params.demand_spread_factor >= Constants::MIN_DEMAND_SPREAD_FACTOR
+                    && *params.demand_spread_factor <= Constants::MAX_DEMAND_SPREAD_FACTOR,
+                Errors::INVALID_PARAMS,
+            );
+
+            // max_total_utilization_bps — hard ceiling
+            assert(
+                *params.max_total_utilization_bps > 0
+                    && *params.max_total_utilization_bps <= Constants::MAX_TOTAL_UTILIZATION_CAP_BPS,
+                Errors::INVALID_PARAMS,
+            );
+
+            // min_notional_per_swap
+            assert(*params.min_notional_per_swap > 0, Errors::INVALID_PARAMS);
+
+            //max_oracle_staleness_seconds
+            assert(
+                *params.max_oracle_staleness_seconds >= Constants::MIN_ORACLE_STALENESS_SECONDS,
+                Errors::INVALID_PARAMS,
+            );
+
+            //max_rate_change_per_update_bps — must be > 0 and <= 100%
+            assert(
+                *params.max_rate_change_per_update_bps > 0
+                    && *params.max_rate_change_per_update_bps <= Constants::BPS,
+                Errors::INVALID_PARAMS,
+            );
+
         }
 
         /// Get oracle rate
@@ -211,12 +268,6 @@ pub mod MarketManagerComponent {
             assert(
                 current_time - rate_timestamp <= market.params.max_oracle_staleness_seconds,
                 Errors::ORACLE_STALE,
-            );
-
-            // Check bounds
-            assert(
-                raw_rate >= market.params.min_rate_bps && raw_rate <= market.params.max_rate_bps,
-                Errors::RATE_OUT_OF_BOUNDS,
             );
 
             let mut rate_index = market.rate_index;

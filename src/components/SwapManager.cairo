@@ -7,7 +7,7 @@ pub mod SwapManagerComponent {
     use starknet::{ContractAddress, get_block_timestamp};
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
-    use crate::helpers::fixed_point::mul_div_up;
+    use crate::helpers::fixed_point::{mul_div_down, mul_div_up};
     use crate::helpers::signed_value::apply_pnl;
     use crate::helpers::utils::Utils;
     use crate::libraries::health_calculator::HealthCal;
@@ -123,8 +123,7 @@ pub mod SwapManagerComponent {
             protocol_fee_share_bps: u256,
         ) -> (u256, LpPool, u256, u256) {
             // Validate
-            assert(notional >= *market.params.min_notional, Errors::BELOW_MIN_NOTIONAL);
-            assert(notional <= *market.params.max_notional_per_swap, Errors::ABOVE_MAX_NOTIONAL);
+            assert(notional >= *market.params.min_notional_per_swap, Errors::BELOW_MIN_NOTIONAL);
             //@audit: shouldn't collateral amount be a factor of notional amount ?
             // assert(collateral > 0, Errors::ZERO_AMOUNT);
 
@@ -135,16 +134,16 @@ pub mod SwapManagerComponent {
 
             let current_time = get_block_timestamp();
 
-            // Calculate swap rate (base + imbalance + feeSpread)
-            let (final_rate, _adjustment, _is_positive) = RateEngine::calculate_swap_rate(
-                market.pool, market.params, side, oracle_rate,
+            // Calculate swap rate (oracle + demand spread + base fee spread)
+            let (final_rate, _demand_spread, _is_crowded) = RateEngine::calculate_swap_rate(
+                market.pool, market.params, side, oracle_rate, notional,
             );
 
             // Slippage check
             assert(final_rate <= max_rate_bps, Errors::RATE_EXCEEDS_MAX);
 
             // Calculate requirements
-            let term_seconds = *market.params.swap_term_seconds;
+            let term_seconds = *market.params.max_swap_term_seconds;
             // total margin required to lock (notional * rate * terms * buffer)
             let required_margin = HealthCal::calculate_required_margin(
                 notional, final_rate, term_seconds, *market.params.initial_margin_multiplier_bps,
@@ -168,15 +167,16 @@ pub mod SwapManagerComponent {
                 - pool.locked_for_floating;
             assert(available >= lp_collateral_needed, Errors::INSUFFICIENT_LIQUIDITY);
 
-            // Check utilization cap
-            let locked_for_side = match side {
-                SwapSide::Fixed => pool.locked_for_fixed,
-                SwapSide::Floating => pool.locked_for_floating,
-            };
-            let new_locked = locked_for_side + lp_collateral_needed;
-            let utilization = mul_div_up(new_locked, Constants::BPS, pool.total_collateral);
+            // Check combined utilization (both sides)
+            let total_locked_new = pool.locked_for_fixed
+                + pool.locked_for_floating
+                + lp_collateral_needed;
+            let total_utilization = mul_div_up(
+                total_locked_new, Constants::BPS, pool.total_collateral,
+            );
             assert(
-                utilization <= *market.params.max_utilization_bps, Errors::EXCEEDS_MAX_UTILIZATION,
+                total_utilization <= *market.params.max_total_utilization_bps,
+                Errors::EXCEEDS_TOTAL_UTILIZATION,
             );
 
             // Create swap
@@ -397,25 +397,35 @@ pub mod SwapManagerComponent {
             notional: u256,
             oracle_rate: u256,
         ) -> SwapQuote {
-            let (final_rate, adjustment, is_positive) = RateEngine::calculate_swap_rate(
-                pool, params, side, oracle_rate,
+            let (final_rate, demand_spread, is_crowded) = RateEngine::calculate_swap_rate(
+                pool, params, side, oracle_rate, notional,
             );
 
             let required_collateral = HealthCal::calculate_required_margin(
                 notional,
                 final_rate,
-                *params.swap_term_seconds,
+                *params.max_swap_term_seconds,
                 *params.initial_margin_multiplier_bps,
             );
 
+            // Compute current utilization for the quote
+            let total_locked = *pool.locked_for_fixed + *pool.locked_for_floating;
+            let current_utilization_bps = if *pool.total_collateral > 0 {
+                mul_div_down(total_locked, Constants::BPS, *pool.total_collateral)
+            } else {
+                0
+            };
+
             SwapQuote {
                 base_rate_bps: oracle_rate,
-                imbalance_adjustment_bps: adjustment,
-                adjustment_is_positive: is_positive,
-                fee_spread_bps: *params.fee_spread_bps,
+                imbalance_adjustment_bps: demand_spread,
+                adjustment_is_positive: is_crowded,
+                fee_spread_bps: *params.base_fee_spread_bps + demand_spread,
                 final_rate_bps: final_rate,
                 required_collateral,
                 lp_collateral_to_lock: required_collateral,
+                current_utilization_bps,
+                demand_spread_bps: demand_spread,
             }
         }
 

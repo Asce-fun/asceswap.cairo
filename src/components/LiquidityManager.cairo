@@ -8,7 +8,7 @@ pub mod LiquidityManagerComponent {
     use crate::helpers::safe_erc20::SafeERC20;
     use crate::helpers::signed_value::{negative, positive};
     use crate::libraries::pool_accounting::PoolAccounting;
-    use crate::types::asce_swap::{LpPool, LpPosition, PoolAnalytics, ProtocolConfig};
+    use crate::types::asce_swap::{LpPool, LpPosition, PoolAnalytics};
 
     #[storage]
     pub struct Storage {
@@ -58,25 +58,19 @@ pub mod LiquidityManagerComponent {
             amount: u256,
             caller: ContractAddress,
             mut pool: LpPool,
-            config: @ProtocolConfig,
             collateral_token: ContractAddress,
         ) -> (u256, LpPool) {
             assert(amount >= Constants::MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
 
             let shares_to_mint = if pool.total_shares == 0 {
-                // First deposit - apply inflation protection
-                assert(amount >= *config.min_first_lp_deposit, Errors::FIRST_DEPOSIT_TOO_SMALL);
-
-                // Shares = amount - burned
-                let shares = amount - *config.burned_shares_amount;
-
-                // Total shares includes burned (owned by no one)
+                // First deposit — 1:1 shares (no inflation attack possible since
+                // pool accounting is struct-based, not balanceOf-based)
                 pool.total_shares = amount;
                 pool.total_collateral = amount;
 
-                shares
+                amount
             } else {
-                // Normal proportional calculation using internal method
+                // Proportional calculation
                 let shares: u256 = PoolAccounting::calculate_shares_to_mint(
                     amount, pool.total_shares, pool.total_collateral,
                 );
@@ -248,14 +242,9 @@ pub mod LiquidityManagerComponent {
             self: @ComponentState<TContractState>,
             assets: u256,
             pool: @LpPool,
-            config: @ProtocolConfig,
         ) -> u256 {
             if *pool.total_shares == 0 {
-                // First deposit: shares = assets - burned_shares_amount
-                if assets < *config.min_first_lp_deposit {
-                    return 0; // Would fail min requirement
-                }
-                assets - *config.burned_shares_amount
+                assets // 1:1 for first deposit
             } else {
                 PoolAccounting::calculate_shares_to_mint(
                     assets, *pool.total_shares, *pool.total_collateral,
