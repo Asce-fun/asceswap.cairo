@@ -23,7 +23,7 @@ pub mod Asceswap {
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, MarketStatus,
         PoolAnalytics, ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
-        SwapStatus, UserDashboard, UserLpSummary, UserSwapSummary,
+        SwapStatus, UserDashboard, UserLpSummary, UserSwapSummary, LpPool,
     };
 
     // Component declarations
@@ -176,8 +176,6 @@ pub mod Asceswap {
         let config = ProtocolConfig {
             treasury,
             protocol_fee_share_bps: 2000, // 20% of fees to protocol
-            min_first_lp_deposit: Constants::DEFAULT_MIN_FIRST_LP_DEPOSIT,
-            burned_shares_amount: Constants::MIN_BURNED_SHARES,
             market_creation_fees: Constants::MARKET_CREATION_FEE,
             fee_token: Constants::USDC(),
         };
@@ -229,8 +227,14 @@ pub mod Asceswap {
 
             // Supply initial liquidity
             let caller = get_caller_address();
-            let market = self.market_manager._get_market(pair_id);
-            let config = self.protocol_config.read();
+
+            // let market = self.market_manager._get_market(pair_id);
+            let pool = LpPool {
+                    total_collateral: 0,
+                    locked_for_fixed: 0,
+                    locked_for_floating: 0,
+                    total_shares: 0,
+                };
 
             let (shares, updated_pool) = self
                 .liquidity_manager
@@ -238,17 +242,17 @@ pub mod Asceswap {
                     pair_id,
                     initial_liquidity_amount,
                     caller,
-                    market.pool,
-                    @config,
-                    market.collateral_token,
+                    pool,
+                    collateral_token,
                 );
 
             // Update market with new pool state
-            let mut updated_market = market;
+            let mut updated_market = self.market_manager._get_market(pair_id);
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
 
             // Track user's LP pairs (first deposit to this pair)
+            // this can be removed in the mainnet config - just for easier tracking of LPs during testing
             if !self.user_has_lp_in_pair.read((caller, pair_id)) {
                 let lp_index = self.user_lp_count.read(caller);
                 self.user_lp_pairs.write((caller, lp_index), pair_id);
@@ -282,12 +286,11 @@ pub mod Asceswap {
             self._validate_lp_call(pair_id, market.params.is_lp_permissioned);
 
             let caller = get_caller_address();
-            let config = self.protocol_config.read();
 
             let (shares, updated_pool) = self
                 .liquidity_manager
                 ._supply_lp_collateral(
-                    pair_id, amount, caller, market.pool, @config, market.collateral_token,
+                    pair_id, amount, caller, market.pool, market.collateral_token,
                 );
 
             // Update market with new pool state
@@ -616,8 +619,7 @@ pub mod Asceswap {
         fn preview_deposit_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
             let market = self.market_manager._get_market(pair_id);
             assert(market.status == MarketStatus::Active, Errors::MARKET_NOT_ACTIVE);
-            let config = self.protocol_config.read();
-            self.liquidity_manager._preview_deposit(assets, @market.pool, @config)
+            self.liquidity_manager._preview_deposit(assets, @market.pool)
         }
 
         fn preview_withdraw_for_lp(self: @ContractState, assets: u256, pair_id: felt252) -> u256 {
@@ -756,12 +758,6 @@ pub mod Asceswap {
             assert(!config.fee_token.is_zero(), Errors::ZERO_ADDRESS);
             assert(!config.treasury.is_zero(), Errors::ZERO_ADDRESS);
             assert(config.protocol_fee_share_bps <= (Constants::BPS / 5), Errors::INVALID_PARAMS);
-            assert(
-                config.burned_shares_amount >= Constants::MIN_BURNED_SHARES, Errors::INVALID_PARAMS,
-            );
-            assert(
-                config.min_first_lp_deposit >= Constants::MIN_LP_DEPOSIT, Errors::INVALID_PARAMS,
-            );
             self.protocol_config.write(config);
             self.emit(ProtocolConfigUpdated { config });
         }

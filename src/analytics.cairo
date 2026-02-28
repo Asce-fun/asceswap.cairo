@@ -198,7 +198,7 @@ pub mod Analytics {
                     available_liquidity: pool_analytics.available_liquidity,
                     utilization_bps,
                     current_rate_bps: market.rate_index.last_rate_bps,
-                    fee_spread_bps: market.params.fee_spread_bps,
+                    base_fee_spread_bps: market.params.base_fee_spread_bps,
                     net_exposure: pool_analytics.net_exposure_notional,
                     active_swaps: market.active_swap_count,
                     user_shares: lp_position.shares,
@@ -287,7 +287,7 @@ pub mod Analytics {
                         available_liquidity: pool_analytics.available_liquidity,
                         utilization_bps,
                         current_rate_bps: market.rate_index.last_rate_bps,
-                        fee_spread_bps: market.params.fee_spread_bps,
+                        base_fee_spread_bps: market.params.base_fee_spread_bps,
                         net_exposure: pool_analytics.net_exposure_notional,
                         active_swaps: market.active_swap_count,
                         user_shares: lp_position.shares,
@@ -334,11 +334,11 @@ pub mod Analytics {
                 }
 
                 // Get quotes for both sides to show rates
-                // Use min_notional as a reference amount
+                // Use min_notional_per_swap as a reference amount
                 let fixed_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional);
+                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional_per_swap);
                 let floating_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional);
+                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional_per_swap);
 
                 let market_for_trading = MarketForTrading {
                     pair_id,
@@ -353,9 +353,9 @@ pub mod Analytics {
                     total_liquidity: pool_analytics.total_value,
                     total_swaps_created: market.total_swaps_created,
                     active_swap_count: market.active_swap_count,
-                    swap_term_seconds: market.params.swap_term_seconds,
-                    min_notional: market.params.min_notional,
-                    max_notional_per_swap: market.params.max_notional_per_swap,
+                    min_swap_term_seconds: market.params.min_swap_term_seconds,
+                    max_swap_term_seconds: market.params.max_swap_term_seconds,
+                    min_notional_per_swap: market.params.min_notional_per_swap,
                     swap_fee_bps: market.params.swap_fee_bps,
                     early_exit_fee_bps: market.params.early_exit_fee_bps,
                 };
