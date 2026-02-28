@@ -173,15 +173,12 @@ function toCallDataParams(p: MarketParamsJson) {
     swap_fee_bps: { low: BigInt(p.swap_fee_bps), high: 0n },
     early_exit_fee_bps: { low: BigInt(p.early_exit_fee_bps), high: 0n },
     liquidation_bonus_bps: { low: BigInt(p.liquidation_bonus_bps), high: 0n },
-    fee_spread_bps: { low: BigInt(p.fee_spread_bps), high: 0n },
-    max_imbalance_adjustment_bps: { low: BigInt(p.max_imbalance_adjustment_bps), high: 0n },
-    max_utilization_bps: { low: BigInt(p.max_utilization_bps), high: 0n },
+    base_fee_spread_bps: { low: BigInt(p.base_fee_spread_bps), high: 0n },
+    demand_spread_factor: { low: BigInt(p.demand_spread_factor), high: 0n },
+    max_total_utilization_bps: { low: BigInt(p.max_total_utilization_bps), high: 0n },
     min_notional: { low: BigInt(p.min_notional), high: 0n },
-    max_notional_per_swap: { low: BigInt(p.max_notional_per_swap), high: 0n },
     max_oracle_staleness_seconds: BigInt(p.max_oracle_staleness_seconds),
     max_rate_change_per_update_bps: { low: BigInt(p.max_rate_change_per_update_bps), high: 0n },
-    min_rate_bps: { low: BigInt(p.min_rate_bps), high: 0n },
-    max_rate_bps: { low: BigInt(p.max_rate_bps), high: 0n },
     is_lp_permissioned: p.is_lp_permissioned,
   };
 }
@@ -267,15 +264,12 @@ interface MarketParamsJson {
   swap_fee_bps: number;
   early_exit_fee_bps: number;
   liquidation_bonus_bps: number;
-  fee_spread_bps: number;
-  max_imbalance_adjustment_bps: number;
-  max_utilization_bps: number;
+  base_fee_spread_bps: number;
+  demand_spread_factor: number;
+  max_total_utilization_bps: number;
   min_notional: number;
-  max_notional_per_swap: number;
   max_oracle_staleness_seconds: number;
   max_rate_change_per_update_bps: number;
-  min_rate_bps: number;
-  max_rate_bps: number;
   is_lp_permissioned: boolean;
 }
 
