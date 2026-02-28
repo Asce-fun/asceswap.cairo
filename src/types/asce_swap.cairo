@@ -39,24 +39,25 @@ pub struct MarketParams {
     pub liquidation_threshold_bps: u256,
     pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
     pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
+    
     ///Term Parameter
-    pub swap_term_seconds: u64, // Duration of swaps
+    pub min_swap_term_seconds: u64, // Min Duration for a swaps
+    pub max_swap_term_seconds: u64, // Max duration for a swap
     pub min_hold_period_seconds: u64, // Before early exit allowed
+    
     /// Fee Parameters (in BPS)
-    pub swap_fee_bps: u256, // On collateral at entry
+    pub swap_fee_bps:u256,
     pub early_exit_fee_bps: u256, // Penalty for early exit
     pub liquidation_bonus_bps: u256, // Incentive for liquidators
+    
     ///Rate Parameters
-    pub fee_spread_bps: u256,
-    pub max_imbalance_adjustment_bps: u256,
-    pub max_utilization_bps: u256,
+    pub base_fee_spread_bps: u256, // Minimum spread on all trades (LP's base edge)
+    pub demand_spread_factor: u256, // Capacity scaling factor (higher = more tolerant of imbalance)
+    pub max_total_utilization_bps: u256, // Hard ceiling safety valve (e.g., 9000 = 90%)
     ///Bounds
-    pub min_notional: u256,
-    pub max_notional_per_swap: u256,
+    pub min_notional_per_swap: u256,
     pub max_oracle_staleness_seconds: u64,
     pub max_rate_change_per_update_bps: u256, // Rate change limit
-    pub min_rate_bps: u256, // Floor (can be 0)
-    pub max_rate_bps: u256, // Ceiling (e.g., 1000000 = 10000%)
     //Lp type
     pub is_lp_permissioned: bool // is Lp provisiong open 
 }
@@ -138,8 +139,6 @@ pub struct LpPosition {
 pub struct ProtocolConfig {
     pub treasury: ContractAddress,
     pub protocol_fee_share_bps: u256, // % of collected fees to treasury
-    pub min_first_lp_deposit: u256, // Minimum for first LP
-    pub burned_shares_amount: u256, // Shares burned on first deposit
     pub market_creation_fees: u256,
     pub fee_token: ContractAddress,
 }
@@ -155,6 +154,8 @@ pub struct SwapQuote {
     pub final_rate_bps: u256,
     pub required_collateral: u256,
     pub lp_collateral_to_lock: u256,
+    pub current_utilization_bps: u256,
+    pub demand_spread_bps: u256,
 }
 
 
