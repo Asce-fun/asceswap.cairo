@@ -175,11 +175,9 @@ pub mod Analytics {
                 let market = asce_swap.get_market(pair_id);
                 let pool_analytics = asce_swap.get_pool_analytics(pair_id);
 
-                // Get user's position in this market
-                let lp_position = asce_swap.get_lp_position(user, pair_id);
-                let user_share_value = asce_swap
-                    .convert_to_assets_for_lp(lp_position.shares, pair_id);
-                let user_can_withdraw = asce_swap.is_cooldown_met(user, pair_id);
+                // Get user's position in this market via ERC6909 balance
+                let user_shares = asce_swap.balance_of_lp(user, pair_id);
+                let user_share_value = asce_swap.convert_to_assets(pair_id, user_shares);
 
                 // Calculate utilization
                 let utilization_bps = if pool_analytics.total_value > 0 {
@@ -201,9 +199,9 @@ pub mod Analytics {
                     base_fee_spread_bps: market.params.base_fee_spread_bps,
                     net_exposure: pool_analytics.net_exposure_notional,
                     active_swaps: market.active_swap_count,
-                    user_shares: lp_position.shares,
+                    user_shares,
                     user_share_value,
-                    user_can_withdraw,
+                    user_can_withdraw: true,
                 };
 
                 markets.append(market_for_lp);
@@ -215,7 +213,7 @@ pub mod Analytics {
                     total_active_markets += 1;
                 }
 
-                if lp_position.shares > 0 {
+                if user_shares > 0 {
                     total_user_lp_value += user_share_value;
                     total_user_positions += 1;
 
@@ -262,14 +260,12 @@ pub mod Analytics {
                 let market = asce_swap.get_market(pair_id);
                 let pool_analytics = asce_swap.get_pool_analytics(pair_id);
 
-                // Get user's position in this market
-                let lp_position = asce_swap.get_lp_position(user, pair_id);
+                // Get user's position via ERC6909 balance
+                let user_shares = asce_swap.balance_of_lp(user, pair_id);
 
                 // Only include if user actually has shares
-                if lp_position.shares > 0 {
-                    let user_share_value = asce_swap
-                        .convert_to_assets_for_lp(lp_position.shares, pair_id);
-                    let user_can_withdraw = asce_swap.is_cooldown_met(user, pair_id);
+                if user_shares > 0 {
+                    let user_share_value = asce_swap.convert_to_assets(pair_id, user_shares);
 
                     let utilization_bps = if pool_analytics.total_value > 0 {
                         ((pool_analytics.total_value - pool_analytics.available_liquidity) * 10000)
@@ -290,9 +286,9 @@ pub mod Analytics {
                         base_fee_spread_bps: market.params.base_fee_spread_bps,
                         net_exposure: pool_analytics.net_exposure_notional,
                         active_swaps: market.active_swap_count,
-                        user_shares: lp_position.shares,
+                        user_shares,
                         user_share_value,
-                        user_can_withdraw,
+                        user_can_withdraw: true,
                     };
 
                     positions.append(market_for_lp);
@@ -338,7 +334,9 @@ pub mod Analytics {
                 let fixed_quote = asce_swap
                     .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional_per_swap);
                 let floating_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional_per_swap);
+                    .get_swap_quote(
+                        pair_id, SwapSide::Floating, market.params.min_notional_per_swap,
+                    );
 
                 let market_for_trading = MarketForTrading {
                     pair_id,

@@ -25,8 +25,6 @@ pub mod Constants {
     /// Maximum fee (10%)
     pub const MAX_FEE_BPS: u256 = 1_000;
 
-    pub const MIN_LP_COOLDOWN_SECONDS: u64 = 3_600;
-
     pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 10000; // 100%
 
     pub const MAX_MARGIN_MULTIPLIER_BPS: u256 = 12500; //125%

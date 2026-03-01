@@ -155,7 +155,7 @@ pub mod MockRateOracle {
                 let ts = self.history_timestamp.read(idx);
                 result.append((rate, ts));
                 i += 1;
-            };
+            }
 
             result
         }

@@ -198,11 +198,7 @@ pub mod RateEngine {
     /// impact.
     /// Returns (final_rate, averaged_demand_spread, is_crowded_side)
     pub fn calculate_swap_rate(
-        pool: @LpPool,
-        params: @MarketParams,
-        side: SwapSide,
-        oracle_rate: u256,
-        notional: u256,
+        pool: @LpPool, params: @MarketParams, side: SwapSide, oracle_rate: u256, notional: u256,
     ) -> (u256, u256, bool) {
         // === Pass 1: Pre-trade spread ===
         let spread_before = calculate_demand_spread(pool, params, side);
@@ -231,12 +227,8 @@ pub mod RateEngine {
         };
 
         match side {
-            SwapSide::Fixed => {
-                simulated_pool.locked_for_fixed += capped_margin;
-            },
-            SwapSide::Floating => {
-                simulated_pool.locked_for_floating += capped_margin;
-            },
+            SwapSide::Fixed => { simulated_pool.locked_for_fixed += capped_margin; },
+            SwapSide::Floating => { simulated_pool.locked_for_floating += capped_margin; },
         }
 
         // Post-trade spread
@@ -587,9 +579,7 @@ mod tests {
         };
 
         let spread_low = RateEngine::calculate_demand_spread(@pool_low, @params, SwapSide::Fixed);
-        let spread_high = RateEngine::calculate_demand_spread(
-            @pool_high, @params, SwapSide::Fixed,
-        );
+        let spread_high = RateEngine::calculate_demand_spread(@pool_high, @params, SwapSide::Fixed);
 
         assert(spread_high > spread_low, 'higher imbalance = more spread');
     }
@@ -635,20 +625,19 @@ mod tests {
 
     #[test]
     fn test_average_pricing_small_trade_minimal_impact() {
-        // Small notional relative to pool → spread_before ≈ spread_after → average ≈ pre-trade
+        // Small notional relative to pool → spread_before ≈ spread_after → average ≈
+        // pre-trade
         let pool = fixed_heavy_pool(); // 200k fixed, 50k floating, 1M total
         let params = default_market_params();
         let oracle_rate: u256 = 500;
 
         // Small trade
         let (_rate_small, spread_small, _) = RateEngine::calculate_swap_rate(
-            @pool, @params, SwapSide::Fixed, oracle_rate, 1000, // tiny notional
+            @pool, @params, SwapSide::Fixed, oracle_rate, 1000 // tiny notional
         );
 
         // The rate should be close to oracle + pre-trade spread + base
-        let pre_trade_spread = RateEngine::calculate_demand_spread(
-            @pool, @params, SwapSide::Fixed,
-        );
+        let pre_trade_spread = RateEngine::calculate_demand_spread(@pool, @params, SwapSide::Fixed);
 
         // Small trades should have averaged spread very close to pre-trade spread
         assert(spread_small <= pre_trade_spread + 1, 'small trade: ~pre spread');
@@ -694,10 +683,7 @@ mod tests {
     #[test]
     fn test_zero_collateral_pool() {
         let pool = LpPool {
-            total_collateral: 0,
-            locked_for_fixed: 0,
-            locked_for_floating: 0,
-            total_shares: 0,
+            total_collateral: 0, locked_for_fixed: 0, locked_for_floating: 0, total_shares: 0,
         };
         let params = default_market_params();
 

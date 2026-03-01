@@ -1,5 +1,6 @@
 pub mod components {
     pub mod Analytics;
+    pub mod ERC6909;
     pub mod LiquidityManager;
     pub mod MarketManager;
     pub mod Security;
@@ -11,6 +12,7 @@ pub mod interfaces {
     pub mod analytics;
     pub mod asce_swap;
     pub mod erc20;
+    pub mod erc6909;
     pub mod rate_oracle;
     pub mod security;
 }

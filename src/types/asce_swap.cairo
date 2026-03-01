@@ -39,17 +39,14 @@ pub struct MarketParams {
     pub liquidation_threshold_bps: u256,
     pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
     pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
-    
     ///Term Parameter
     pub min_swap_term_seconds: u64, // Min Duration for a swaps
     pub max_swap_term_seconds: u64, // Max duration for a swap
     pub min_hold_period_seconds: u64, // Before early exit allowed
-    
     /// Fee Parameters (in BPS)
-    pub swap_fee_bps:u256,
+    pub swap_fee_bps: u256,
     pub early_exit_fee_bps: u256, // Penalty for early exit
     pub liquidation_bonus_bps: u256, // Incentive for liquidators
-    
     ///Rate Parameters
     pub base_fee_spread_bps: u256, // Minimum spread on all trades (LP's base edge)
     pub demand_spread_factor: u256, // Capacity scaling factor (higher = more tolerant of imbalance)
@@ -123,14 +120,6 @@ pub struct Swap {
     pub expiration_time: u64,
     // TWA tracking
     pub start_cumulative_rate: u256,
-}
-
-
-/// LP position for a specific market pair
-#[derive(Drop, Copy, Serde, starknet::Store)]
-pub struct LpPosition {
-    pub shares: u256,
-    pub last_deposit_time: u64,
 }
 
 
@@ -242,7 +231,6 @@ pub struct LpAnalytics {
     pub net_exposure: SignedValue, // + means pool is net short (swappers winning)
     pub your_exposure: SignedValue, // Your share of net exposure
     // Status
-    pub can_withdraw: bool, // Cooldown met?
     pub max_withdrawable: u256 // How much can be withdrawn now
 }
 
@@ -294,6 +282,5 @@ pub struct UserLpSummary {
     pub share_value: u256,
     pub share_percentage_bps: u256,
     pub utilization_bps: u256,
-    pub can_withdraw: bool,
 }
 

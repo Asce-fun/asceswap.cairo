@@ -1,173 +1,254 @@
 #[starknet::component]
 pub mod LiquidityManagerComponent {
-    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
-    use starknet::{ContractAddress, get_block_timestamp, get_contract_address};
+    use ERC6909Component::InternalTrait as ERC6909InternalTrait;
+    use openzeppelin_introspection::src5::SRC5Component;
+    use starknet::{ContractAddress, get_contract_address};
+    use crate::components::ERC6909::ERC6909Component;
+    use crate::components::ERC6909::ERC6909Component::ERC6909Impl;
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
-    use crate::helpers::fixed_point::mul_div_down;
+    use crate::helpers::fixed_point::{mul_div_down, mul_div_up};
     use crate::helpers::safe_erc20::SafeERC20;
     use crate::helpers::signed_value::{negative, positive};
-    use crate::libraries::pool_accounting::PoolAccounting;
-    use crate::types::asce_swap::{LpPool, LpPosition, PoolAnalytics};
+    use crate::types::asce_swap::{LpPool, PoolAnalytics};
 
     #[storage]
-    pub struct Storage {
-        lp_positions: Map<(ContractAddress, felt252), LpPosition>,
-    }
+    pub struct Storage {}
 
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
-        LpDeposited: LpDeposited,
-        LpWithdrawn: LpWithdrawn,
+        Deposit: Deposit,
+        Withdraw: Withdraw,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct LpDeposited {
+    pub struct Deposit {
         #[key]
-        pub lp: ContractAddress,
+        pub caller: ContractAddress,
+        #[key]
+        pub receiver: ContractAddress,
         #[key]
         pub pair_id: felt252,
-        pub amount: u256,
-        pub shares_minted: u256,
-        pub total_shares_after: u256,
+        pub assets: u256,
+        pub shares: u256,
         pub timestamp: u64,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct LpWithdrawn {
+    pub struct Withdraw {
         #[key]
-        pub lp: ContractAddress,
+        pub caller: ContractAddress,
+        #[key]
+        pub receiver: ContractAddress,
         #[key]
         pub pair_id: felt252,
-        pub shares_burned: u256,
-        pub amount_received: u256,
-        pub total_shares_after: u256,
+        pub assets: u256,
+        pub shares: u256,
         pub timestamp: u64,
     }
 
     #[generate_trait]
     pub impl InternalImpl<
-        TContractState, +HasComponent<TContractState>, +Drop<TContractState>,
+        TContractState,
+        +HasComponent<TContractState>,
+        +Drop<TContractState>,
+        impl ERC6909Comp: ERC6909Component::HasComponent<TContractState>,
+        +SRC5Component::HasComponent<TContractState>,
+        +ERC6909Component::ERC6909HooksTrait<TContractState>,
     > of InternalTrait<TContractState> {
-        /// Supply LP collateral to a market
+        /// Deposit assets into a market pool, mint shares to receiver
         /// Returns (shares_minted, updated_pool)
-        fn _supply_lp_collateral(
+        fn _deposit(
             ref self: ComponentState<TContractState>,
             pair_id: felt252,
-            amount: u256,
+            assets: u256,
             caller: ContractAddress,
+            receiver: ContractAddress,
             mut pool: LpPool,
             collateral_token: ContractAddress,
         ) -> (u256, LpPool) {
-            assert(amount >= Constants::MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
+            // assert(assets >= Constants::MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
+            let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
+            
+            let id: u256 = pair_id.into();
 
-            let shares_to_mint = if pool.total_shares == 0 {
-                // First deposit — 1:1 shares (no inflation attack possible since
-                // pool accounting is struct-based, not balanceOf-based)
-                pool.total_shares = amount;
-                pool.total_collateral = amount;
+            let shares = self._convert_to_shares(assets, @pool);
 
-                amount
-            } else {
-                // Proportional calculation
-                let shares: u256 = PoolAccounting::calculate_shares_to_mint(
-                    amount, pool.total_shares, pool.total_collateral,
-                );
+            // Update pool state
+            pool.total_shares = pool.total_shares + shares;
+            pool.total_collateral = pool.total_collateral + assets;
 
-                pool.total_shares = pool.total_shares + shares;
-                pool.total_collateral = pool.total_collateral + amount;
-
-                shares
-            };
-
-            // Update LP position
-            let mut position = self.lp_positions.read((caller, pair_id));
-            position.shares = position.shares + shares_to_mint;
-            position.last_deposit_time = get_block_timestamp();
-            self.lp_positions.write((caller, pair_id), position);
-
-            // Transfer tokens
+            // Transfer underlying tokens from caller
             SafeERC20::strict_transfer_from(
-                collateral_token, caller, get_contract_address(), amount,
+                collateral_token, caller, get_contract_address(), assets,
             );
+
+            // Mint ERC6909 LP tokens to receiver
+            erc6909.mint(receiver, id, shares);
 
             self
                 .emit(
-                    LpDeposited {
-                        lp: caller,
+                    Deposit {
+                        caller,
+                        receiver,
                         pair_id,
-                        amount,
-                        shares_minted: shares_to_mint,
-                        total_shares_after: position.shares,
-                        timestamp: get_block_timestamp(),
+                        assets,
+                        shares,
+                        timestamp: starknet::get_block_timestamp(),
                     },
                 );
 
-            (shares_to_mint, pool)
+            (shares, pool)
         }
 
-        /// Withdraw LP collateral from a market
-        /// Returns (withdrawal_amount, updated_pool)
-        fn _withdraw_lp_collateral(
+        /// Mint exact shares to receiver, pull required assets from caller
+        /// Returns (assets_deposited, updated_pool)
+        fn _mint(
             ref self: ComponentState<TContractState>,
             pair_id: felt252,
             shares: u256,
             caller: ContractAddress,
+            receiver: ContractAddress,
             mut pool: LpPool,
             collateral_token: ContractAddress,
         ) -> (u256, LpPool) {
-            let mut position = self.lp_positions.read((caller, pair_id));
-            assert(position.shares >= shares, Errors::INSUFFICIENT_SHARES);
+            let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
 
-            let current_time = get_block_timestamp();
-            assert(
-                current_time >= position.last_deposit_time + Constants::MIN_LP_COOLDOWN_SECONDS,
-                Errors::LP_COOLDOWN_NOT_MET,
+            let id: u256 = pair_id.into();
+
+            // ERC4626: assets = previewMint(shares) — rounds UP (caller pays more)
+            let assets = self._preview_mint(shares, @pool);
+
+            // Update pool state
+            pool.total_shares = pool.total_shares + shares;
+            pool.total_collateral = pool.total_collateral + assets;
+
+            // Transfer underlying tokens from caller
+            SafeERC20::strict_transfer_from(
+                collateral_token, caller, get_contract_address(), assets,
             );
 
-            // Calculate withdrawal amount using internal method
-            let withdrawal_amount = PoolAccounting::calculate_withdrawal_amount(
-                shares, pool.total_shares, pool.total_collateral,
-            );
-
-            // Check available liquidity (not locked)
-            let available = pool.total_collateral
-                - pool.locked_for_fixed
-                - pool.locked_for_floating;
-            assert(withdrawal_amount <= available, Errors::EXCEEDS_AVAILABLE_LIQUIDITY);
-
-            // Update LP position
-            position.shares = position.shares - shares;
-            self.lp_positions.write((caller, pair_id), position);
-
-            // Update pool
-            pool.total_shares = pool.total_shares - shares;
-            pool.total_collateral = pool.total_collateral - withdrawal_amount;
-
-            // Transfer tokens
-            SafeERC20::strict_transfer(collateral_token, caller, withdrawal_amount);
+            // Mint ERC6909 LP tokens to receiver
+            erc6909.mint(receiver, id, shares);
 
             self
                 .emit(
-                    LpWithdrawn {
-                        lp: caller,
+                    Deposit {
+                        caller,
+                        receiver,
                         pair_id,
-                        shares_burned: shares,
-                        amount_received: withdrawal_amount,
-                        total_shares_after: position.shares,
-                        timestamp: current_time,
+                        assets,
+                        shares,
+                        timestamp: starknet::get_block_timestamp(),
                     },
                 );
 
-            (withdrawal_amount, pool)
+            (assets, pool)
         }
 
-        /// Get LP position
-        fn _get_lp_position(
-            self: @ComponentState<TContractState>, lp: ContractAddress, pair_id: felt252,
-        ) -> LpPosition {
-            self.lp_positions.read((lp, pair_id))
+        /// Burn caller's shares, send assets to receiver
+        /// Returns (assets_out, updated_pool)
+        fn _redeem(
+            ref self: ComponentState<TContractState>,
+            pair_id: felt252,
+            shares: u256,
+            caller: ContractAddress,
+            receiver: ContractAddress,
+            mut pool: LpPool,
+            collateral_token: ContractAddress,
+        ) -> (u256, LpPool) {
+            let id: u256 = pair_id.into();
+
+            // Check balance via ERC6909
+            let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
+            let caller_balance = erc6909.balance_of(caller, id);
+            assert(caller_balance >= shares, Errors::INSUFFICIENT_SHARES);
+
+            // ERC4626: assets = convertToAssets(shares)
+            let assets = self._convert_to_assets(shares, @pool);
+
+            // Check available liquidity
+            let available = pool.total_collateral
+                - pool.locked_for_fixed
+                - pool.locked_for_floating;
+            assert(assets <= available, Errors::EXCEEDS_AVAILABLE_LIQUIDITY);
+
+            // Update pool
+            pool.total_shares = pool.total_shares - shares;
+            pool.total_collateral = pool.total_collateral - assets;
+
+            // Burn ERC6909 LP tokens
+            erc6909.burn(caller, id, shares);
+
+            // Transfer underlying to receiver
+            SafeERC20::strict_transfer(collateral_token, receiver, assets);
+
+            self
+                .emit(
+                    Withdraw {
+                        caller,
+                        receiver,
+                        pair_id,
+                        assets,
+                        shares,
+                        timestamp: starknet::get_block_timestamp(),
+                    },
+                );
+
+            (assets, pool)
+        }
+
+        /// Withdraw exact assets to receiver, burn required shares from caller
+        /// Returns (shares_burned, updated_pool)
+        fn _withdraw(
+            ref self: ComponentState<TContractState>,
+            pair_id: felt252,
+            assets: u256,
+            caller: ContractAddress,
+            receiver: ContractAddress,
+            mut pool: LpPool,
+            collateral_token: ContractAddress,
+        ) -> (u256, LpPool) {
+            let id: u256 = pair_id.into();
+
+            // ERC4626: shares = previewWithdraw(assets) — rounds UP (caller burns more)
+            let shares = self._preview_withdraw(assets, @pool);
+
+            // Check balance via ERC6909
+            let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
+            let caller_balance = erc6909.balance_of(caller, id);
+            assert(caller_balance >= shares, Errors::INSUFFICIENT_SHARES);
+
+            // Check available liquidity
+            let available = pool.total_collateral
+                - pool.locked_for_fixed
+                - pool.locked_for_floating;
+            assert(assets <= available, Errors::EXCEEDS_AVAILABLE_LIQUIDITY);
+
+            // Update pool
+            pool.total_shares = pool.total_shares - shares;
+            pool.total_collateral = pool.total_collateral - assets;
+
+            // Burn ERC6909 LP tokens
+            erc6909.burn(caller, id, shares);
+
+            // Transfer underlying to receiver
+            SafeERC20::strict_transfer(collateral_token, receiver, assets);
+
+            self
+                .emit(
+                    Withdraw {
+                        caller,
+                        receiver,
+                        pair_id,
+                        assets,
+                        shares,
+                        timestamp: starknet::get_block_timestamp(),
+                    },
+                );
+
+            (shares, pool)
         }
 
         /// Get pool analytics
@@ -206,7 +287,6 @@ pub mod LiquidityManagerComponent {
             }
         }
 
-
         fn _exchange_rate(self: @ComponentState<TContractState>, pool: @LpPool) -> u256 {
             if *pool.total_shares == 0 {
                 return Constants::PRECISION; // 1:1 when no shares exist
@@ -221,61 +301,101 @@ pub mod LiquidityManagerComponent {
             if *pool.total_shares == 0 || *pool.total_collateral == 0 {
                 return assets; // 1:1 for first deposit
             }
-            PoolAccounting::calculate_shares_to_mint(
-                assets, *pool.total_shares, *pool.total_collateral,
-            )
+            mul_div_down(assets, *pool.total_shares, *pool.total_collateral)
         }
 
         fn _convert_to_assets(
             self: @ComponentState<TContractState>, shares: u256, pool: @LpPool,
         ) -> u256 {
             if *pool.total_shares == 0 {
-                return shares; // 1:1 when no shares
+                return 0;
             }
-            PoolAccounting::calculate_withdrawal_amount(
-                shares, *pool.total_shares, *pool.total_collateral,
-            )
+            mul_div_down(shares, *pool.total_collateral, *pool.total_shares)
         }
 
-        /// Preview deposit: how many shares would be minted for a deposit amount
-        fn _preview_deposit(
-            self: @ComponentState<TContractState>,
-            assets: u256,
-            pool: @LpPool,
-        ) -> u256 {
-            if *pool.total_shares == 0 {
-                assets // 1:1 for first deposit
-            } else {
-                PoolAccounting::calculate_shares_to_mint(
-                    assets, *pool.total_shares, *pool.total_collateral,
-                )
-            }
-        }
-
-        /// Preview withdraw: how many assets would be received for burning shares
-        fn _preview_withdraw(
+        /// Preview mint: how many assets needed to mint exact shares (rounds UP)
+        fn _preview_mint(
             self: @ComponentState<TContractState>, shares: u256, pool: @LpPool,
         ) -> u256 {
-            PoolAccounting::calculate_withdrawal_amount(
-                shares, *pool.total_shares, *pool.total_collateral,
-            )
+            if *pool.total_shares == 0 || *pool.total_collateral == 0 {
+                return shares; // 1:1 for first deposit
+            }
+            mul_div_up(shares, *pool.total_collateral, *pool.total_shares)
         }
 
-
-        /// Check if cooldown period has passed for an LP
-        fn _is_cooldown_met(
-            self: @ComponentState<TContractState>, lp: ContractAddress, pair_id: felt252,
-        ) -> bool {
-            let position = self.lp_positions.read((lp, pair_id));
-            let current_time = get_block_timestamp();
-            current_time >= position.last_deposit_time + Constants::MIN_LP_COOLDOWN_SECONDS
+        /// Preview withdraw: how many shares needed to withdraw exact assets (rounds UP)
+        fn _preview_withdraw(
+            self: @ComponentState<TContractState>, assets: u256, pool: @LpPool,
+        ) -> u256 {
+            if *pool.total_shares == 0 || *pool.total_collateral == 0 {
+                return assets; // 1:1
+            }
+            mul_div_up(assets, *pool.total_shares, *pool.total_collateral)
         }
 
-        /// Get LP's share balance
+        /// Get LP's share balance via ERC6909
         fn _balance_of(
             self: @ComponentState<TContractState>, lp: ContractAddress, pair_id: felt252,
         ) -> u256 {
-            self.lp_positions.read((lp, pair_id)).shares
+            let id: u256 = pair_id.into();
+            let erc6909 = get_dep_component!(self, ERC6909Comp);
+            erc6909.balance_of(lp, id)
+        }
+
+        fn _total_assets(self: @ComponentState<TContractState>, pool: @LpPool) -> u256 {
+            *pool.total_collateral
+        }
+
+        fn _max_deposit(self: @ComponentState<TContractState>) -> u256 {
+            // No hard cap — limited only by ERC20 balance + approval
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff_u256
+        }
+
+        fn _max_mint(self: @ComponentState<TContractState>) -> u256 {
+            // No hard cap — limited only by ERC20 balance + approval
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff_u256
+        }
+
+        fn _max_withdraw(
+            self: @ComponentState<TContractState>,
+            owner: ContractAddress,
+            pair_id: felt252,
+            pool: @LpPool,
+        ) -> u256 {
+            let owner_shares = self._balance_of(owner, pair_id);
+            if owner_shares == 0 || *pool.total_shares == 0 {
+                return 0;
+            }
+            let share_value = self._convert_to_assets(owner_shares, pool);
+            let available = *pool.total_collateral
+                - *pool.locked_for_fixed
+                - *pool.locked_for_floating;
+            if share_value < available {
+                share_value
+            } else {
+                available
+            }
+        }
+
+        fn _max_redeem(
+            self: @ComponentState<TContractState>,
+            owner: ContractAddress,
+            pair_id: felt252,
+            pool: @LpPool,
+        ) -> u256 {
+            let owner_shares = self._balance_of(owner, pair_id);
+            if owner_shares == 0 || *pool.total_shares == 0 {
+                return 0;
+            }
+            let available = *pool.total_collateral
+                - *pool.locked_for_fixed
+                - *pool.locked_for_floating;
+            let max_shares_for_available = self._convert_to_shares(available, pool);
+            if owner_shares < max_shares_for_available {
+                owner_shares
+            } else {
+                max_shares_for_available
+            }
         }
     }
 }

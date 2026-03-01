@@ -1,6 +1,8 @@
 #[starknet::component]
 pub mod AnalyticsComponent {
+    use openzeppelin_introspection::src5::SRC5Component;
     use starknet::{ContractAddress, get_block_timestamp};
+    use crate::components::ERC6909::ERC6909Component;
     use crate::components::LiquidityManager::LiquidityManagerComponent;
     use crate::components::LiquidityManager::LiquidityManagerComponent::InternalTrait as LiquidityInternalTrait;
     use crate::components::MarketManager::MarketManagerComponent;
@@ -34,6 +36,9 @@ pub mod AnalyticsComponent {
         impl MarketMgr: MarketManagerComponent::HasComponent<TContractState>,
         impl SwapMgr: SwapManagerComponent::HasComponent<TContractState>,
         impl LiquidityMgr: LiquidityManagerComponent::HasComponent<TContractState>,
+        +ERC6909Component::HasComponent<TContractState>,
+        +SRC5Component::HasComponent<TContractState>,
+        +ERC6909Component::ERC6909HooksTrait<TContractState>,
     > of InternalTrait<TContractState> {
         fn _get_swap_analytics(
             self: @ComponentState<TContractState>, swap_id: u256,
@@ -146,13 +151,13 @@ pub mod AnalyticsComponent {
             let liquidity_mgr = LiquidityMgr::get_component(contract);
 
             let market = market_mgr._get_market(pair_id);
-            let lp_position = liquidity_mgr._get_lp_position(lp, pair_id);
+            let shares = liquidity_mgr._balance_of(lp, pair_id);
             let pool_analytics = liquidity_mgr._get_pool_analytics(@market.pool);
 
-            let share_value = liquidity_mgr._convert_to_assets(lp_position.shares, @market.pool);
+            let share_value = liquidity_mgr._convert_to_assets(shares, @market.pool);
 
             let share_percentage_bps = if market.pool.total_shares > 0 {
-                (lp_position.shares * Constants::BPS) / market.pool.total_shares
+                (shares * Constants::BPS) / market.pool.total_shares
             } else {
                 0
             };
@@ -177,19 +182,14 @@ pub mod AnalyticsComponent {
                 positive(0)
             };
 
-            let can_withdraw = liquidity_mgr._is_cooldown_met(lp, pair_id);
-            let max_withdrawable = if can_withdraw {
-                if share_value < pool_analytics.available_liquidity {
-                    share_value
-                } else {
-                    pool_analytics.available_liquidity
-                }
+            let max_withdrawable = if share_value < pool_analytics.available_liquidity {
+                share_value
             } else {
-                0
+                pool_analytics.available_liquidity
             };
 
             LpAnalytics {
-                shares: lp_position.shares,
+                shares,
                 share_value,
                 share_percentage_bps,
                 pool_tvl: pool_analytics.total_value,
@@ -197,7 +197,6 @@ pub mod AnalyticsComponent {
                 utilization_bps,
                 net_exposure: pool_analytics.net_exposure_notional,
                 your_exposure,
-                can_withdraw,
                 max_withdrawable,
             }
         }
@@ -320,11 +319,10 @@ pub mod AnalyticsComponent {
             let mut total_lp_positions: u32 = 0;
 
             for pair_id in lp_pair_ids {
-                let lp_position = liquidity_mgr._get_lp_position(user, *pair_id);
-                if lp_position.shares > 0 {
+                let shares = liquidity_mgr._balance_of(user, *pair_id);
+                if shares > 0 {
                     let market = market_mgr._get_market(*pair_id);
-                    let share_value = liquidity_mgr
-                        ._convert_to_assets(lp_position.shares, @market.pool);
+                    let share_value = liquidity_mgr._convert_to_assets(shares, @market.pool);
                     total_lp_value += share_value;
                     total_lp_positions += 1;
                 }
@@ -355,15 +353,14 @@ pub mod AnalyticsComponent {
             let mut summaries: Array<UserLpSummary> = array![];
 
             for pair_id in pair_ids {
-                let lp_position = liquidity_mgr._get_lp_position(user, *pair_id);
+                let shares = liquidity_mgr._balance_of(user, *pair_id);
 
-                if lp_position.shares > 0 {
+                if shares > 0 {
                     let market = market_mgr._get_market(*pair_id);
-                    let share_value = liquidity_mgr
-                        ._convert_to_assets(lp_position.shares, @market.pool);
+                    let share_value = liquidity_mgr._convert_to_assets(shares, @market.pool);
 
                     let share_percentage_bps = if market.pool.total_shares > 0 {
-                        (lp_position.shares * Constants::BPS) / market.pool.total_shares
+                        (shares * Constants::BPS) / market.pool.total_shares
                     } else {
                         0
                     };
@@ -376,17 +373,14 @@ pub mod AnalyticsComponent {
                         0
                     };
 
-                    let can_withdraw = liquidity_mgr._is_cooldown_met(user, *pair_id);
-
                     summaries
                         .append(
                             UserLpSummary {
                                 pair_id: *pair_id,
-                                shares: lp_position.shares,
+                                shares,
                                 share_value,
                                 share_percentage_bps,
                                 utilization_bps,
-                                can_withdraw,
                             },
                         );
                 }

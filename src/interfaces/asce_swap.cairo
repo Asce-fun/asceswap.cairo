@@ -1,6 +1,6 @@
 use starknet::ContractAddress;
 use crate::types::asce_swap::{
-    HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
+    HealthStatus, LpAnalytics, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
     ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard, UserLpSummary,
     UserSwapSummary,
 };
@@ -35,11 +35,70 @@ pub trait IAsceSwap<TContractState> {
         ref self: TContractState, token: ContractAddress, amount: u256, recipient: ContractAddress,
     );
 
-    /// Deposit collateral to LP pool
-    fn supply_lp_collateral(ref self: TContractState, pair_id: felt252, amount: u256) -> u256;
+    // === Vault Operations ===
 
-    /// Withdraw collateral from LP pool
-    fn withdraw_lp_collateral(ref self: TContractState, pair_id: felt252, shares: u256) -> u256;
+    /// Deposit assets into a market pool, mint shares to receiver
+    fn deposit(
+        ref self: TContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Mint exact shares, pull required assets from caller
+    fn mint(
+        ref self: TContractState, pair_id: felt252, shares: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Redeem shares from a market pool, send assets to receiver
+    fn redeem(
+        ref self: TContractState, pair_id: felt252, shares: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Withdraw exact assets, burn required shares from caller
+    fn withdraw(
+        ref self: TContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    // === Vault Views ===
+
+    /// Total assets held by the vault for a market
+    fn total_assets(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Exchange rate for LP shares
+    fn exchange_rate(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Convert assets to shares
+    fn convert_to_shares(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Convert shares to assets
+    fn convert_to_assets(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview deposit: how many shares for a given deposit
+    fn preview_deposit(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Preview mint: how many assets needed to mint exact shares (rounds up)
+    fn preview_mint(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview redeem: how many assets for burning shares
+    fn preview_redeem(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview withdraw: how many shares needed to withdraw exact assets (rounds up)
+    fn preview_withdraw(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Max deposit (no hard cap)
+    fn max_deposit(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Max mint (no hard cap)
+    fn max_mint(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Max assets owner can withdraw
+    fn max_withdraw(self: @TContractState, owner: ContractAddress, pair_id: felt252) -> u256;
+
+    /// Max shares owner can redeem
+    fn max_redeem(self: @TContractState, owner: ContractAddress, pair_id: felt252) -> u256;
+
+    /// Get LP's share balance for a pair
+    fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
+
+    // === Swap Operations ===
 
     /// Buy a new swap position
     fn buy_swap(
@@ -60,6 +119,8 @@ pub trait IAsceSwap<TContractState> {
     /// Liquidate an unhealthy position
     fn liquidate(ref self: TContractState, swap_id: u256);
 
+    // === Market Views ===
+
     /// Get market pair info
     fn get_market(self: @TContractState, pair_id: felt252) -> MarketPair;
 
@@ -71,23 +132,8 @@ pub trait IAsceSwap<TContractState> {
         self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256,
     ) -> SwapQuote;
 
-    fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
-
-    fn is_cooldown_met(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> bool;
-
     /// Get health status of a swap
     fn get_health_status(self: @TContractState, swap_id: u256) -> HealthStatus;
-
-    fn exchange_rate_for_lp(self: @TContractState, pair_id: felt252) -> u256;
-    fn convert_to_shares_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-    fn convert_to_assets_for_lp(self: @TContractState, shares: u256, pair_id: felt252) -> u256;
-
-
-    fn preview_deposit_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-    fn preview_withdraw_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-
-    /// Get LP position
-    fn get_lp_position(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> LpPosition;
 
     /// Get pool analytics
     fn get_pool_analytics(self: @TContractState, pair_id: felt252) -> PoolAnalytics;
@@ -101,6 +147,7 @@ pub trait IAsceSwap<TContractState> {
     /// Get next swap ID
     fn get_next_swap_id(self: @TContractState) -> u256;
 
+    // === Analytics ===
 
     /// Get comprehensive swap analytics (for frontend dashboard)
     fn get_swap_analytics(self: @TContractState, swap_id: u256) -> SwapAnalytics;

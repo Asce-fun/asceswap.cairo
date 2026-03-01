@@ -112,7 +112,7 @@ pub mod MarketManagerComponent {
                 total_swaps_created: 0,
                 active_swap_count: 0,
             };
-            
+
             self.markets.write(pair_id, market);
             self
                 .emit(
@@ -163,7 +163,6 @@ pub mod MarketManagerComponent {
 
         /// Validate market parameters
         fn _validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
-            
             // liquidation_threshold_bps
             assert(
                 *params.liquidation_threshold_bps >= Constants::MIN_LIQUIDATION_THRESHOLD_BPS
@@ -199,9 +198,9 @@ pub mod MarketManagerComponent {
                 Errors::INVALID_PARAMS,
             );
 
-            // 7. min_hold_period_seconds — at least MIN_LP_COOLDOWN and <= min_swap_term
+            // 7. min_hold_period_seconds — must be > 0 and <= min_swap_term
             assert(
-                *params.min_hold_period_seconds > 0 
+                *params.min_hold_period_seconds > 0
                     && *params.min_hold_period_seconds <= *params.min_swap_term_seconds,
                 Errors::INVALID_PARAMS,
             );
@@ -228,7 +227,8 @@ pub mod MarketManagerComponent {
             // max_total_utilization_bps — hard ceiling
             assert(
                 *params.max_total_utilization_bps > 0
-                    && *params.max_total_utilization_bps <= Constants::MAX_TOTAL_UTILIZATION_CAP_BPS,
+                    && *params
+                        .max_total_utilization_bps <= Constants::MAX_TOTAL_UTILIZATION_CAP_BPS,
                 Errors::INVALID_PARAMS,
             );
 
@@ -247,7 +247,6 @@ pub mod MarketManagerComponent {
                     && *params.max_rate_change_per_update_bps <= Constants::BPS,
                 Errors::INVALID_PARAMS,
             );
-
         }
 
         /// Get oracle rate
