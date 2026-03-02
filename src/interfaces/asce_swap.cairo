@@ -35,7 +35,6 @@ pub trait IAsceSwap<TContractState> {
         ref self: TContractState, token: ContractAddress, amount: u256, recipient: ContractAddress,
     );
 
-    // === Vault Operations ===
 
     /// Deposit assets into a market pool, mint shares to receiver
     fn deposit(
@@ -56,8 +55,6 @@ pub trait IAsceSwap<TContractState> {
     fn withdraw(
         ref self: TContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
     ) -> u256;
-
-    // === Vault Views ===
 
     /// Total assets held by the vault for a market
     fn total_assets(self: @TContractState, pair_id: felt252) -> u256;
@@ -98,7 +95,10 @@ pub trait IAsceSwap<TContractState> {
     /// Get LP's share balance for a pair
     fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
 
-    // === Swap Operations ===
+    /// Get LP's share balances across multiple pairs
+    fn batch_balance_of_lp(
+        self: @TContractState, lp: ContractAddress, pair_ids: Span<felt252>,
+    ) -> Span<u256>;
 
     /// Buy a new swap position
     fn buy_swap(

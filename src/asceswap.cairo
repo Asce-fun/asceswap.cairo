@@ -274,8 +274,6 @@ pub mod Asceswap {
             self.market_manager._unpause_market(pair_id);
         }
 
-        // === Vault Operations ===
-
         fn deposit(
             ref self: ContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
         ) -> u256 {
@@ -300,12 +298,12 @@ pub mod Asceswap {
 
             // TODO : Remove - use indexer instead
             // Track user's LP pairs (only if first deposit to this pair)
-            if !self.user_has_lp_in_pair.read((caller, pair_id)) {
-                let lp_index = self.user_lp_count.read(caller);
-                self.user_lp_pairs.write((caller, lp_index), pair_id);
-                self.user_lp_count.write(caller, lp_index + 1);
-                self.user_has_lp_in_pair.write((caller, pair_id), true);
-            }
+            // if !self.user_has_lp_in_pair.read((caller, pair_id)) {
+            //     let lp_index = self.user_lp_count.read(caller);
+            //     self.user_lp_pairs.write((caller, lp_index), pair_id);
+            //     self.user_lp_count.write(caller, lp_index + 1);
+            //     self.user_has_lp_in_pair.write((caller, pair_id), true);
+            // }
 
             self.reentrancy.end();
             shares
@@ -334,12 +332,12 @@ pub mod Asceswap {
             self.market_manager._write_market(pair_id, updated_market);
 
             // Track user's LP pairs (only if first deposit to this pair)
-            if !self.user_has_lp_in_pair.read((caller, pair_id)) {
-                let lp_index = self.user_lp_count.read(caller);
-                self.user_lp_pairs.write((caller, lp_index), pair_id);
-                self.user_lp_count.write(caller, lp_index + 1);
-                self.user_has_lp_in_pair.write((caller, pair_id), true);
-            }
+            // if !self.user_has_lp_in_pair.read((caller, pair_id)) {
+            //     let lp_index = self.user_lp_count.read(caller);
+            //     self.user_lp_pairs.write((caller, lp_index), pair_id);
+            //     self.user_lp_count.write(caller, lp_index + 1);
+            //     self.user_has_lp_in_pair.write((caller, pair_id), true);
+            // }
 
             self.reentrancy.end();
             assets
@@ -649,8 +647,6 @@ pub mod Asceswap {
             self.token_whitelisted.read(token)
         }
 
-        // === Vault Views ===
-
         fn total_assets(self: @ContractState, pair_id: felt252) -> u256 {
             let market = self.market_manager._get_market(pair_id);
             self.liquidity_manager._total_assets(@market.pool)
@@ -673,7 +669,7 @@ pub mod Asceswap {
 
         fn preview_deposit(self: @ContractState, pair_id: felt252, assets: u256) -> u256 {
             let market = self.market_manager._get_market(pair_id);
-            self.liquidity_manager._convert_to_shares(assets, @market.pool)
+            self.liquidity_manager._preview_deposit(assets, @market.pool)
         }
 
         fn preview_mint(self: @ContractState, pair_id: felt252, shares: u256) -> u256 {
@@ -683,7 +679,7 @@ pub mod Asceswap {
 
         fn preview_redeem(self: @ContractState, pair_id: felt252, shares: u256) -> u256 {
             let market = self.market_manager._get_market(pair_id);
-            self.liquidity_manager._convert_to_assets(shares, @market.pool)
+            self.liquidity_manager._preview_redeem(shares, @market.pool)
         }
 
         fn preview_withdraw(self: @ContractState, pair_id: felt252, assets: u256) -> u256 {
@@ -712,6 +708,16 @@ pub mod Asceswap {
         /// Get LP's share balance
         fn balance_of_lp(self: @ContractState, lp: ContractAddress, pair_id: felt252) -> u256 {
             self.liquidity_manager._balance_of(lp, pair_id)
+        }
+
+        fn batch_balance_of_lp(
+            self: @ContractState, lp: ContractAddress, pair_ids: Span<felt252>,
+        ) -> Span<u256> {
+            let mut balances: Array<u256> = array![];
+            for pair_id in pair_ids {
+                balances.append(self.liquidity_manager._balance_of(lp, *pair_id));
+            };
+            balances.span()
         }
 
         fn get_swap_analytics(self: @ContractState, swap_id: u256) -> SwapAnalytics {

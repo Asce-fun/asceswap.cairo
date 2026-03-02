@@ -68,12 +68,13 @@ pub mod LiquidityManagerComponent {
             mut pool: LpPool,
             collateral_token: ContractAddress,
         ) -> (u256, LpPool) {
-            // assert(assets >= Constants::MIN_LP_DEPOSIT, Errors::BELOW_MIN_DEPOSIT);
+          
             let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
             
             let id: u256 = pair_id.into();
 
-            let shares = self._convert_to_shares(assets, @pool);
+            // ERC4626: shares = previewDeposit(assets) — rounds DOWN
+            let shares = self._preview_deposit(assets, @pool);
 
             // Update pool state
             pool.total_shares = pool.total_shares + shares;
@@ -165,8 +166,8 @@ pub mod LiquidityManagerComponent {
             let caller_balance = erc6909.balance_of(caller, id);
             assert(caller_balance >= shares, Errors::INSUFFICIENT_SHARES);
 
-            // ERC4626: assets = convertToAssets(shares)
-            let assets = self._convert_to_assets(shares, @pool);
+            // ERC4626: assets = previewRedeem(shares) — rounds DOWN
+            let assets = self._preview_redeem(shares, @pool);
 
             // Check available liquidity
             let available = pool.total_collateral
@@ -305,6 +306,26 @@ pub mod LiquidityManagerComponent {
         }
 
         fn _convert_to_assets(
+            self: @ComponentState<TContractState>, shares: u256, pool: @LpPool,
+        ) -> u256 {
+            if *pool.total_shares == 0 {
+                return 0;
+            }
+            mul_div_down(shares, *pool.total_collateral, *pool.total_shares)
+        }
+
+        /// Preview deposit: how many shares for a given deposit (rounds DOWN — favor protocol)
+        fn _preview_deposit(
+            self: @ComponentState<TContractState>, assets: u256, pool: @LpPool,
+        ) -> u256 {
+            if *pool.total_shares == 0 || *pool.total_collateral == 0 {
+                return assets; // 1:1 for first deposit
+            }
+            mul_div_down(assets, *pool.total_shares, *pool.total_collateral)
+        }
+
+        /// Preview redeem: how many assets for burning shares (rounds DOWN — favor protocol)
+        fn _preview_redeem(
             self: @ComponentState<TContractState>, shares: u256, pool: @LpPool,
         ) -> u256 {
             if *pool.total_shares == 0 {
