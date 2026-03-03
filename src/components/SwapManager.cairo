@@ -117,24 +117,23 @@ pub mod SwapManagerComponent {
             notional: u256,
             collateral: u256,
             max_rate_bps: u256,
+            swap_term: u64,
             caller: ContractAddress,
             market: @MarketPair,
             oracle_rate: u256,
             protocol_fee_share_bps: u256,
         ) -> (u256, LpPool, u256, u256) {
-            // Validate
+
             assert(notional >= *market.params.min_notional_per_swap, Errors::BELOW_MIN_NOTIONAL);
-            //@audit: shouldn't collateral amount be a factor of notional amount ?
-            // assert(collateral > 0, Errors::ZERO_AMOUNT);
 
             assert(
-                notional <= collateral * *market.params.initial_margin_multiplier_bps,
-                'Exceeds max leverage',
+                swap_term >= *market.params.min_swap_term_seconds
+                    && swap_term <= *market.params.max_swap_term_seconds,
+                Errors::INVALID_SWAP_TERM,
             );
 
             let current_time = get_block_timestamp();
 
-            // Calculate swap rate (oracle + demand spread + base fee spread)
             let (final_rate, _demand_spread, _is_crowded) = RateEngine::calculate_swap_rate(
                 market.pool, market.params, side, oracle_rate, notional,
             );
@@ -142,21 +141,27 @@ pub mod SwapManagerComponent {
             // Slippage check
             assert(final_rate <= max_rate_bps, Errors::RATE_EXCEEDS_MAX);
 
-            // Calculate requirements
-            let term_seconds = *market.params.max_swap_term_seconds;
-            // total margin required to lock (notional * rate * terms * buffer)
-            let required_margin = HealthCal::calculate_required_margin(
-                notional, final_rate, term_seconds, *market.params.initial_margin_multiplier_bps,
+            // max_exposure = the most that can flow between buyer and LP
+            let max_exposure = HealthCal::calculate_max_exposure(notional, final_rate, swap_term);
+
+            let required_margin = mul_div_up(
+                max_exposure, *market.params.initial_margin_multiplier_bps, Constants::BPS,
             );
 
-            // LP must lock same amount
-            let lp_collateral_needed = required_margin;
+            let lp_collateral_needed = max_exposure;
 
-            // Calculate fees
-            let swap_fee = Utils::calculate_fee(collateral, *market.params.swap_fee_bps);
-            let protocol_portion = Utils::calculate_fee(swap_fee, protocol_fee_share_bps);
-            let lp_fee_portion = swap_fee - protocol_portion;
-            let net_collateral = collateral - swap_fee;
+            // Calculate fees on max_exposure (deterministic per position)
+            let (net_collateral, lp_fee_portion, protocol_portion) = match *market
+                .params
+                .swap_fee_bps {
+                0 => { (collateral, 0, 0) },
+                _ => {
+                    let swap_fee = Utils::calculate_fee(max_exposure, *market.params.swap_fee_bps);
+                    let protocol_portion = Utils::calculate_fee(swap_fee, protocol_fee_share_bps);
+                    let lp_fee_portion = swap_fee - protocol_portion;
+                    (collateral - swap_fee, lp_fee_portion, protocol_portion)
+                },
+            };
 
             assert(net_collateral >= required_margin, Errors::INSUFFICIENT_COLLATERAL);
 
@@ -194,7 +199,7 @@ pub mod SwapManagerComponent {
                 lp_collateral_locked: lp_collateral_needed,
                 initial_required_margin: required_margin,
                 start_time: current_time,
-                expiration_time: current_time + term_seconds,
+                expiration_time: current_time + swap_term,
                 start_cumulative_rate: (*market.rate_index).cumulative_rate_time,
             };
 
@@ -212,7 +217,6 @@ pub mod SwapManagerComponent {
 
             pool.total_collateral = pool.total_collateral + lp_fee_portion;
 
-            // Transfer collateral - done by main contract
 
             self
                 .emit(
@@ -225,7 +229,7 @@ pub mod SwapManagerComponent {
                         fixed_rate_bps: final_rate,
                         buyer_collateral: net_collateral,
                         lp_collateral_locked: lp_collateral_needed,
-                        expiration_time: current_time + term_seconds,
+                        expiration_time: current_time + swap_term,
                         timestamp: current_time,
                     },
                 );
@@ -249,7 +253,7 @@ pub mod SwapManagerComponent {
             let current_time = get_block_timestamp();
             assert(current_time >= swap.expiration_time, Errors::SWAP_NOT_EXPIRED);
 
-            // Process settlement using SettlementEngine (pass snapshot)
+            // Process settlement using SettlementEngine 
             let result = SettlementEngine::process_settlement(
                 @swap, market.rate_index, market.params, SettlementType::Normal, current_time,
             );
@@ -388,7 +392,7 @@ pub mod SwapManagerComponent {
             self.swaps.read(swap_id)
         }
 
-        /// Get swap quote
+        /// Get swap quote for a given term
         fn get_swap_quote(
             self: @ComponentState<TContractState>,
             pool: @LpPool,
@@ -396,16 +400,15 @@ pub mod SwapManagerComponent {
             side: SwapSide,
             notional: u256,
             oracle_rate: u256,
+            swap_term: u64,
         ) -> SwapQuote {
             let (final_rate, demand_spread, is_crowded) = RateEngine::calculate_swap_rate(
                 pool, params, side, oracle_rate, notional,
             );
 
-            let required_collateral = HealthCal::calculate_required_margin(
-                notional,
-                final_rate,
-                *params.max_swap_term_seconds,
-                *params.initial_margin_multiplier_bps,
+            let max_exposure = HealthCal::calculate_max_exposure(notional, final_rate, swap_term);
+            let required_collateral = mul_div_up(
+                max_exposure, *params.initial_margin_multiplier_bps, Constants::BPS,
             );
 
             // Compute current utilization for the quote
@@ -423,7 +426,7 @@ pub mod SwapManagerComponent {
                 fee_spread_bps: *params.base_fee_spread_bps + demand_spread,
                 final_rate_bps: final_rate,
                 required_collateral,
-                lp_collateral_to_lock: required_collateral,
+                lp_collateral_to_lock: max_exposure,
                 current_utilization_bps,
                 demand_spread_bps: demand_spread,
             }

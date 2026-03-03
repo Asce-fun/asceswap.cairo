@@ -29,4 +29,5 @@ pub mod Errors {
     pub const MARKET_NOT_PAUSED: felt252 = 'Market not paused';
     pub const TOKEN_NOT_WHITELISTED: felt252 = 'Token not whitelisted';
     pub const EXCEEDS_TOTAL_UTILIZATION: felt252 = 'Exceeds total utilization';
+    pub const INVALID_SWAP_TERM: felt252 = 'Swap term out of bounds';
 }

@@ -12,9 +12,10 @@ pub mod Analytics {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use crate::interfaces::analytics::IAnalytics;
     use crate::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
+    use crate::interfaces::erc6909::{IERC6909Dispatcher, IERC6909DispatcherTrait};
     use crate::types::analytics::{
         DashboardPageData, DetailedScenario, LpPageData, MarketForLp, MarketForTrading,
-        MarketsPageData, SwapDetailData, SwapScenarioAnalysis, UserLpPositions,
+        MarketsPageData, SwapDetailData, SwapScenarioAnalysis,
     };
     use crate::types::asce_swap::{MarketStatus, SignedValue, SwapSide, SwapStatus};
 
@@ -36,21 +37,6 @@ pub mod Analytics {
 
     #[abi(embed_v0)]
     impl AnalyticsImpl of IAnalytics<ContractState> {
-        /// Get complete user dashboard with automatic ID discovery
-        /// Just pass the user address - fetches all swap IDs and LP positions automatically
-        fn get_user_dashboard_full(
-            self: @ContractState, user: ContractAddress,
-        ) -> DashboardPageData {
-            let asce_swap = self._get_dispatcher();
-
-            // Automatically fetch user's swap IDs and LP pair IDs from main contract
-            let swap_ids = asce_swap.get_user_swap_ids(user);
-            let lp_pair_ids = asce_swap.get_user_lp_pair_ids(user);
-
-            // Delegate to the main dashboard function
-            self.get_dashboard_page(user, swap_ids, lp_pair_ids)
-        }
-
         /// Get all data needed for user dashboard page (with explicit IDs)
         /// Use this if you already have the IDs from an indexer
         fn get_dashboard_page(
@@ -159,6 +145,7 @@ pub mod Analytics {
             self: @ContractState, user: ContractAddress, market_pair_ids: Span<felt252>,
         ) -> LpPageData {
             let asce_swap = self._get_dispatcher();
+            let erc6909 = self._get_erc6909_dispatcher();
 
             let mut markets: Array<MarketForLp> = array![];
             let mut total_protocol_tvl: u256 = 0;
@@ -176,7 +163,7 @@ pub mod Analytics {
                 let pool_analytics = asce_swap.get_pool_analytics(pair_id);
 
                 // Get user's position in this market via ERC6909 balance
-                let user_shares = asce_swap.balance_of_lp(user, pair_id);
+                let user_shares = erc6909.balance_of(user, pair_id.into());
                 let user_share_value = asce_swap.convert_to_assets(pair_id, user_shares);
 
                 // Calculate utilization
@@ -242,66 +229,6 @@ pub mod Analytics {
             }
         }
 
-        /// Get user's LP positions automatically (only markets where user has LP)
-        fn get_user_lp_positions(self: @ContractState, user: ContractAddress) -> UserLpPositions {
-            let asce_swap = self._get_dispatcher();
-
-            // Auto-fetch user's LP pair IDs from main contract
-            let lp_pair_ids = asce_swap.get_user_lp_pair_ids(user);
-
-            let mut positions: Array<MarketForLp> = array![];
-            let mut total_lp_value: u256 = 0;
-            let mut total_positions: u32 = 0;
-
-            let mut i: u32 = 0;
-            let len = lp_pair_ids.len();
-            while i < len {
-                let pair_id = *lp_pair_ids.at(i);
-                let market = asce_swap.get_market(pair_id);
-                let pool_analytics = asce_swap.get_pool_analytics(pair_id);
-
-                // Get user's position via ERC6909 balance
-                let user_shares = asce_swap.balance_of_lp(user, pair_id);
-
-                // Only include if user actually has shares
-                if user_shares > 0 {
-                    let user_share_value = asce_swap.convert_to_assets(pair_id, user_shares);
-
-                    let utilization_bps = if pool_analytics.total_value > 0 {
-                        ((pool_analytics.total_value - pool_analytics.available_liquidity) * 10000)
-                            / pool_analytics.total_value
-                    } else {
-                        0
-                    };
-
-                    let market_for_lp = MarketForLp {
-                        pair_id,
-                        status: market.status,
-                        collateral_token: market.collateral_token,
-                        decimals: market.decimals,
-                        total_tvl: pool_analytics.total_value,
-                        available_liquidity: pool_analytics.available_liquidity,
-                        utilization_bps,
-                        current_rate_bps: market.rate_index.last_rate_bps,
-                        base_fee_spread_bps: market.params.base_fee_spread_bps,
-                        net_exposure: pool_analytics.net_exposure_notional,
-                        active_swaps: market.active_swap_count,
-                        user_shares,
-                        user_share_value,
-                        user_can_withdraw: true,
-                    };
-
-                    positions.append(market_for_lp);
-                    total_lp_value += user_share_value;
-                    total_positions += 1;
-                }
-
-                i += 1;
-            }
-
-            UserLpPositions { user, total_lp_value, total_positions, positions: positions.span() }
-        }
-
         /// Get all data needed for markets/trading page
         fn get_markets_page(
             self: @ContractState, market_pair_ids: Span<felt252>,
@@ -330,12 +257,20 @@ pub mod Analytics {
                 }
 
                 // Get quotes for both sides to show rates
-                // Use min_notional_per_swap as a reference amount
+                // Use min_notional_per_swap and max_swap_term as reference
                 let fixed_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional_per_swap);
+                    .get_swap_quote(
+                        pair_id,
+                        SwapSide::Fixed,
+                        market.params.min_notional_per_swap,
+                        market.params.max_swap_term_seconds,
+                    );
                 let floating_quote = asce_swap
                     .get_swap_quote(
-                        pair_id, SwapSide::Floating, market.params.min_notional_per_swap,
+                        pair_id,
+                        SwapSide::Floating,
+                        market.params.min_notional_per_swap,
+                        market.params.max_swap_term_seconds,
                     );
 
                 let market_for_trading = MarketForTrading {
@@ -555,6 +490,10 @@ pub mod Analytics {
     impl InternalImpl of InternalTrait {
         fn _get_dispatcher(self: @ContractState) -> IAsceSwapDispatcher {
             IAsceSwapDispatcher { contract_address: self.asce_swap_contract.read() }
+        }
+
+        fn _get_erc6909_dispatcher(self: @ContractState) -> IERC6909Dispatcher {
+            IERC6909Dispatcher { contract_address: self.asce_swap_contract.read() }
         }
     }
 }

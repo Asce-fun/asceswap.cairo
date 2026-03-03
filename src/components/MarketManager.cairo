@@ -24,6 +24,7 @@ pub mod MarketManagerComponent {
         MarketPairCreated: MarketPairCreated,
         MarketPaused: MarketPaused,
         MarketUnpaused: MarketUnpaused,
+        RateIndexUpdated: RateIndexUpdated,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -49,6 +50,15 @@ pub mod MarketManagerComponent {
     pub struct MarketUnpaused {
         #[key]
         pub pair_id: felt252,
+        pub timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RateIndexUpdated {
+        #[key]
+        pub pair_id: felt252,
+        pub new_rate_bps: u256,
+        pub cumulative_rate_time: u256,
         pub timestamp: u64,
     }
 
@@ -163,6 +173,7 @@ pub mod MarketManagerComponent {
 
         /// Validate market parameters
         fn _validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
+            
             // liquidation_threshold_bps
             assert(
                 *params.liquidation_threshold_bps >= Constants::MIN_LIQUIDATION_THRESHOLD_BPS
@@ -200,7 +211,7 @@ pub mod MarketManagerComponent {
 
             // 7. min_hold_period_seconds — must be > 0 and <= min_swap_term
             assert(
-                *params.min_hold_period_seconds > 0
+                *params.min_hold_period_seconds > 0 
                     && *params.min_hold_period_seconds <= *params.min_swap_term_seconds,
                 Errors::INVALID_PARAMS,
             );
@@ -227,8 +238,7 @@ pub mod MarketManagerComponent {
             // max_total_utilization_bps — hard ceiling
             assert(
                 *params.max_total_utilization_bps > 0
-                    && *params
-                        .max_total_utilization_bps <= Constants::MAX_TOTAL_UTILIZATION_CAP_BPS,
+                    && *params.max_total_utilization_bps <= Constants::MAX_TOTAL_UTILIZATION_CAP_BPS,
                 Errors::INVALID_PARAMS,
             );
 
@@ -247,6 +257,7 @@ pub mod MarketManagerComponent {
                     && *params.max_rate_change_per_update_bps <= Constants::BPS,
                 Errors::INVALID_PARAMS,
             );
+
         }
 
         /// Get oracle rate
@@ -270,17 +281,6 @@ pub mod MarketManagerComponent {
             );
 
             let mut rate_index = market.rate_index;
-
-            // If first update, just initialize(although this condition should never trigger , since
-            // we are already intializing at market creation)
-            // if rate_index.last_update_time == 0 {
-            //     rate_index.last_update_time = current_time;
-            //     rate_index.last_rate_bps = raw_rate;
-            //     rate_index.cumulative_rate_time = 0;
-            //     rate_index.last_valid_rate_bps = raw_rate;
-            //     market.rate_index = rate_index;
-            //     return raw_rate;
-            // }
 
             let time_delta: u256 = (current_time - rate_index.last_update_time).into();
 
@@ -312,6 +312,16 @@ pub mod MarketManagerComponent {
             rate_index.last_valid_rate_bps = clamped_rate;
 
             market.rate_index = rate_index;
+
+            self
+                .emit(
+                    RateIndexUpdated {
+                        pair_id: market.pair_id,
+                        new_rate_bps: clamped_rate,
+                        cumulative_rate_time: rate_index.cumulative_rate_time,
+                        timestamp: current_time,
+                    },
+                );
 
             clamped_rate
         }

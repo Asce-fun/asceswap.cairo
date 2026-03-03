@@ -92,15 +92,7 @@ pub trait IAsceSwap<TContractState> {
     /// Max shares owner can redeem
     fn max_redeem(self: @TContractState, owner: ContractAddress, pair_id: felt252) -> u256;
 
-    /// Get LP's share balance for a pair
-    fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
-
-    /// Get LP's share balances across multiple pairs
-    fn batch_balance_of_lp(
-        self: @TContractState, lp: ContractAddress, pair_ids: Span<felt252>,
-    ) -> Span<u256>;
-
-    /// Buy a new swap position
+    /// Buy a new swap position (caller pays, receiver gets the position NFT)
     fn buy_swap(
         ref self: TContractState,
         pair_id: felt252,
@@ -108,6 +100,8 @@ pub trait IAsceSwap<TContractState> {
         notional: u256,
         collateral: u256,
         max_rate_bps: u256,
+        swap_term: u64,
+        receiver: ContractAddress,
     ) -> u256;
 
     /// Settle an expired swap
@@ -127,9 +121,9 @@ pub trait IAsceSwap<TContractState> {
     /// Get swap info
     fn get_swap(self: @TContractState, swap_id: u256) -> Swap;
 
-    /// Get swap quote (preview rate and requirements)
+    /// Get swap quote (preview rate and requirements for a given term)
     fn get_swap_quote(
-        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256,
+        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256, swap_term: u64,
     ) -> SwapQuote;
 
     /// Get health status of a swap
@@ -182,21 +176,6 @@ pub trait IAsceSwap<TContractState> {
         self: @TContractState, user: ContractAddress, pair_ids: Span<felt252>,
     ) -> Span<UserLpSummary>;
 
-    // ============================================================
-    // TODO [MAINNET]: Replace with off-chain indexer
-    // These use on-chain arrays which don't scale well.
-    // ============================================================
-    /// Get all swap IDs owned by a user
-    fn get_user_swap_ids(self: @TContractState, user: ContractAddress) -> Span<u256>;
-
-    /// Get all LP pair IDs where user has a position
-    fn get_user_lp_pair_ids(self: @TContractState, user: ContractAddress) -> Span<felt252>;
-
-    /// Get count of user's swaps
-    fn get_user_swap_count(self: @TContractState, user: ContractAddress) -> u32;
-
-    /// Get count of user's LP positions
-    fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
     fn poke_rate_index(ref self: TContractState, pair_id: felt252);
 
     /// Whitelist a token for use as collateral

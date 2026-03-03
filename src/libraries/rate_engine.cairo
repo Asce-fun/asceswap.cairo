@@ -87,6 +87,7 @@ pub mod RateEngine {
         let expiration_time = *swap.expiration_time;
 
         // Cap at expiration - never include post-expiration rates
+        //@audit - why do we need the min_u64 here? shouldn't effective_end_time = expiration_time always?
         let effective_end_time = min_u64(current_time, expiration_time);
 
         // Duration for TWA calculation
@@ -234,7 +235,7 @@ pub mod RateEngine {
         // Post-trade spread
         let spread_after = calculate_demand_spread(@simulated_pool, params, side);
 
-        // === Average the two spreads ===
+        //Average the two spreads
         let final_demand_spread = (spread_before + spread_after) / 2;
 
         // Determine if this side is crowded (pre-trade state for display)
