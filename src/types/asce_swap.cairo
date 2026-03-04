@@ -12,7 +12,6 @@ pub enum SwapStatus {
     Uninitialized,
     Active,
     Settled,
-    Liquidated,
     ExitedEarly,
 }
 
@@ -36,7 +35,6 @@ pub struct SignedValue {
 #[derive(Drop, Copy, Serde, Debug, starknet::Store)]
 pub struct MarketParams {
     ///Risk Parameters
-    pub liquidation_threshold_bps: u256,
     pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
     pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
     ///Term Parameter
@@ -45,8 +43,8 @@ pub struct MarketParams {
     pub min_hold_period_seconds: u64, // Before early exit allowed
     /// Fee Parameters (in BPS)
     pub swap_fee_bps: u256,
-    pub early_exit_fee_bps: u256, // Penalty for early exit
-    pub liquidation_bonus_bps: u256, // Incentive for liquidators
+    pub max_early_exit_fee_bps: u256, // Fee at start of term (e.g. 300 = 3%)
+    pub min_early_exit_fee_bps: u256, // Fee near expiry (e.g. 25 = 0.25%)
     ///Rate Parameters
     pub base_fee_spread_bps: u256, // Minimum spread on all trades (LP's base edge)
     pub demand_spread_factor: u256, // Capacity scaling factor (higher = more tolerant of imbalance)
@@ -155,7 +153,6 @@ pub struct HealthStatus {
     pub buyer_remaining_value: u256,
     pub required_margin: u256,
     pub health_factor_bps: u256,
-    pub is_liquidatable: bool,
     pub time_to_expiry_seconds: u64,
 }
 
@@ -176,7 +173,6 @@ pub enum SettlementType {
     #[default]
     Normal, // settle_swap at expiration
     EarlyExit, // early_exit with penalty
-    Liquidation // liquidate with bonus
 }
 
 /// Result of a settlement operation
@@ -184,7 +180,6 @@ pub enum SettlementType {
 pub struct SettlementResult {
     pub buyer_payout: u256,
     pub lp_delta: SignedValue,
-    pub liquidator_bonus: u256, // 0 for non-liquidation
     pub penalty: u256, // 0 for non-early-exit
     pub twa_rate_bps: u256,
     pub pnl: SignedValue,
@@ -207,7 +202,6 @@ pub struct SwapAnalytics {
     pub notional: u256,
     pub collateral: u256,
     pub health_factor_bps: u256,
-    pub is_liquidatable: bool,
     // Time info
     pub elapsed_seconds: u64,
     pub remaining_seconds: u64,

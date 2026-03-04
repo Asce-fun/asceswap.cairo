@@ -21,8 +21,6 @@ pub mod Errors {
     pub const EXCEEDS_MAX_UTILIZATION: felt252 = 'Exceeds max utilization';
     pub const INSUFFICIENT_LIQUIDITY: felt252 = 'Insufficient pool liquidity';
     pub const MIN_HOLD_PERIOD: felt252 = 'Min hold period not met';
-    pub const NOT_LIQUIDATABLE: felt252 = 'Position not liquidatable';
-    pub const HEALTHY_POSITION: felt252 = 'Position is healthy';
     pub const TRANSFER_FAILED: felt252 = 'Token transfer failed';
     pub const TRANSFER_FROM_FAILED: felt252 = 'Token transferFrom failed';
     pub const SWAP_EXPIRED_USE_SETTLE: felt252 = 'SWAP_EXPIRED_USE_SETTLE';
@@ -30,4 +28,5 @@ pub mod Errors {
     pub const TOKEN_NOT_WHITELISTED: felt252 = 'Token not whitelisted';
     pub const EXCEEDS_TOTAL_UTILIZATION: felt252 = 'Exceeds total utilization';
     pub const INVALID_SWAP_TERM: felt252 = 'Swap term out of bounds';
+    pub const NOTHING_TO_CLAIM: felt252 = 'Nothing to claim';
 }

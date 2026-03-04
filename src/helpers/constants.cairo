@@ -13,12 +13,6 @@ pub mod Constants {
     /// Minimum LP deposit amount
     pub const MIN_LP_DEPOSIT: u256 = 1_000;
 
-    /// Minimum liquidation threshold (50%)
-    pub const MIN_LIQUIDATION_THRESHOLD_BPS: u256 = 5_000;
-
-    /// Maximum liquidation threshold (95%)
-    pub const MAX_LIQUIDATION_THRESHOLD_BPS: u256 = 9_500;
-
     /// Minimum swap term (1 hour) — prevents flash swap attacks
     pub const MIN_SWAP_TERM_SECONDS: u64 = 3_600;
 

@@ -107,11 +107,11 @@ pub trait IAsceSwap<TContractState> {
     /// Settle an expired swap
     fn settle_swap(ref self: TContractState, swap_id: u256);
 
+    /// Claim payout from a settled swap (NFT owner only)
+    fn claim(ref self: TContractState, swap_id: u256);
+
     /// Early exit from a swap (before expiration)
     fn early_exit(ref self: TContractState, swap_id: u256);
-
-    /// Liquidate an unhealthy position
-    fn liquidate(ref self: TContractState, swap_id: u256);
 
     // === Market Views ===
 
