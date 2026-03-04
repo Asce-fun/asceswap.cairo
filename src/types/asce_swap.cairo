@@ -12,7 +12,6 @@ pub enum SwapStatus {
     Uninitialized,
     Active,
     Settled,
-    Liquidated,
     ExitedEarly,
 }
 
@@ -36,27 +35,24 @@ pub struct SignedValue {
 #[derive(Drop, Copy, Serde, Debug, starknet::Store)]
 pub struct MarketParams {
     ///Risk Parameters
-    pub liquidation_threshold_bps: u256,
     pub initial_margin_multiplier_bps: u256, // e.g., 12000 = 120% of max exposure
     pub min_margin_floor_bps: u256, // e.g., 2000 = 20% minimum at expiry
     ///Term Parameter
-    pub swap_term_seconds: u64, // Duration of swaps
+    pub min_swap_term_seconds: u64, // Min Duration for a swaps
+    pub max_swap_term_seconds: u64, // Max duration for a swap
     pub min_hold_period_seconds: u64, // Before early exit allowed
     /// Fee Parameters (in BPS)
-    pub swap_fee_bps: u256, // On collateral at entry
-    pub early_exit_fee_bps: u256, // Penalty for early exit
-    pub liquidation_bonus_bps: u256, // Incentive for liquidators
+    pub swap_fee_bps: u256,
+    pub max_early_exit_fee_bps: u256, // Fee at start of term (e.g. 300 = 3%)
+    pub min_early_exit_fee_bps: u256, // Fee near expiry (e.g. 25 = 0.25%)
     ///Rate Parameters
-    pub fee_spread_bps: u256,
-    pub max_imbalance_adjustment_bps: u256,
-    pub max_utilization_bps: u256,
+    pub base_fee_spread_bps: u256, // Minimum spread on all trades (LP's base edge)
+    pub demand_spread_factor: u256, // Capacity scaling factor (higher = more tolerant of imbalance)
+    pub max_total_utilization_bps: u256, // Hard ceiling safety valve (e.g., 9000 = 90%)
     ///Bounds
-    pub min_notional: u256,
-    pub max_notional_per_swap: u256,
+    pub min_notional_per_swap: u256,
     pub max_oracle_staleness_seconds: u64,
     pub max_rate_change_per_update_bps: u256, // Rate change limit
-    pub min_rate_bps: u256, // Floor (can be 0)
-    pub max_rate_bps: u256, // Ceiling (e.g., 1000000 = 10000%)
     //Lp type
     pub is_lp_permissioned: bool // is Lp provisiong open 
 }
@@ -125,21 +121,11 @@ pub struct Swap {
 }
 
 
-/// LP position for a specific market pair
-#[derive(Drop, Copy, Serde, starknet::Store)]
-pub struct LpPosition {
-    pub shares: u256,
-    pub last_deposit_time: u64,
-}
-
-
 /// Protocol-wide configuration
 #[derive(Drop, Copy, Serde, starknet::Store)]
 pub struct ProtocolConfig {
     pub treasury: ContractAddress,
     pub protocol_fee_share_bps: u256, // % of collected fees to treasury
-    pub min_first_lp_deposit: u256, // Minimum for first LP
-    pub burned_shares_amount: u256, // Shares burned on first deposit
     pub market_creation_fees: u256,
     pub fee_token: ContractAddress,
 }
@@ -155,6 +141,8 @@ pub struct SwapQuote {
     pub final_rate_bps: u256,
     pub required_collateral: u256,
     pub lp_collateral_to_lock: u256,
+    pub current_utilization_bps: u256,
+    pub demand_spread_bps: u256,
 }
 
 
@@ -165,7 +153,6 @@ pub struct HealthStatus {
     pub buyer_remaining_value: u256,
     pub required_margin: u256,
     pub health_factor_bps: u256,
-    pub is_liquidatable: bool,
     pub time_to_expiry_seconds: u64,
 }
 
@@ -186,7 +173,6 @@ pub enum SettlementType {
     #[default]
     Normal, // settle_swap at expiration
     EarlyExit, // early_exit with penalty
-    Liquidation // liquidate with bonus
 }
 
 /// Result of a settlement operation
@@ -194,7 +180,6 @@ pub enum SettlementType {
 pub struct SettlementResult {
     pub buyer_payout: u256,
     pub lp_delta: SignedValue,
-    pub liquidator_bonus: u256, // 0 for non-liquidation
     pub penalty: u256, // 0 for non-early-exit
     pub twa_rate_bps: u256,
     pub pnl: SignedValue,
@@ -217,7 +202,6 @@ pub struct SwapAnalytics {
     pub notional: u256,
     pub collateral: u256,
     pub health_factor_bps: u256,
-    pub is_liquidatable: bool,
     // Time info
     pub elapsed_seconds: u64,
     pub remaining_seconds: u64,
@@ -241,7 +225,6 @@ pub struct LpAnalytics {
     pub net_exposure: SignedValue, // + means pool is net short (swappers winning)
     pub your_exposure: SignedValue, // Your share of net exposure
     // Status
-    pub can_withdraw: bool, // Cooldown met?
     pub max_withdrawable: u256 // How much can be withdrawn now
 }
 
@@ -293,6 +276,5 @@ pub struct UserLpSummary {
     pub share_value: u256,
     pub share_percentage_bps: u256,
     pub utilization_bps: u256,
-    pub can_withdraw: bool,
 }
 

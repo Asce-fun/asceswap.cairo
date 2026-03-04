@@ -1,7 +1,6 @@
 // Settlement Engine Component
-// Handles all swap closure logic: settle, early_exit, and liquidation
-// Eliminates code redundancy by providing unified settlement processing
 pub mod SettlementEngine {
+    use crate::helpers::fixed_point::mul_div_down;
     use crate::helpers::signed_value::{negative, positive, safe_sub};
     use crate::helpers::utils::Utils;
     use crate::libraries::pool_accounting::PoolAccounting;
@@ -12,38 +11,12 @@ pub mod SettlementEngine {
     };
 
 
-    /// Calculate PnL for a swap at expiration (full term)
-    pub fn calculate_pnl(swap: @Swap, twa_rate_bps: u256) -> SignedValue {
+    /// Calculate PnL for a swap over a given period
+    pub fn calculate_pnl(swap: @Swap, twa_rate_bps: u256, end_time: u64) -> SignedValue {
         let notional = *swap.notional;
         let fixed_rate = *swap.fixed_rate_bps;
-        let term_seconds = *swap.expiration_time - *swap.start_time;
+        let elapsed_seconds = end_time - *swap.start_time;
 
-        // Calculate payments
-        let fixed_payment = RateEngine::calculate_payment(notional, fixed_rate, term_seconds);
-        let floating_payment = RateEngine::calculate_payment(notional, twa_rate_bps, term_seconds);
-
-        // PnL depends on swap side
-        match *swap.side {
-            SwapSide::Fixed => {
-                // Buyer pays fixed, receives floating
-                safe_sub(floating_payment, fixed_payment)
-            },
-            SwapSide::Floating => {
-                // Buyer pays floating, receives fixed
-                safe_sub(fixed_payment, floating_payment)
-            },
-        }
-    }
-
-    /// Calculate partial PnL for early exit (pro-rated)
-    pub fn calculate_pnl_partial(
-        swap: @Swap, twa_rate_bps: u256, current_time: u64,
-    ) -> SignedValue {
-        let notional = *swap.notional;
-        let fixed_rate = *swap.fixed_rate_bps;
-        let elapsed_seconds = current_time - *swap.start_time;
-
-        // Calculate pro-rated payments based on elapsed time
         let fixed_payment = RateEngine::calculate_payment(notional, fixed_rate, elapsed_seconds);
         let floating_payment = RateEngine::calculate_payment(
             notional, twa_rate_bps, elapsed_seconds,
@@ -89,6 +62,18 @@ pub mod SettlementEngine {
         }
     }
 
+    /// Linear decay: max_fee at term start -> min_fee at expiry
+    pub fn calculate_early_exit_fee_bps(
+        start_time: u64, expiration_time: u64, current_time: u64,
+        max_fee_bps: u256, min_fee_bps: u256,
+    ) -> u256 {
+        let total_term: u256 = (expiration_time - start_time).into();
+        let elapsed: u256 = (current_time - start_time).into();
+        let range = max_fee_bps - min_fee_bps;
+        let decay = mul_div_down(elapsed, range, total_term);
+        max_fee_bps - decay
+    }
+
     /// Process a complete settlement for any settlement type
     /// Returns the settlement result with all payouts calculated
     pub fn process_settlement(
@@ -102,50 +87,32 @@ pub mod SettlementEngine {
         let twa_rate = RateEngine::calculate_twa(rate_index, swap, current_time);
 
         // Calculate base PnL based on settlement type
-        let base_pnl = match settlement_type {
-            SettlementType::Normal => calculate_pnl(swap, twa_rate),
-            SettlementType::EarlyExit => calculate_pnl_partial(swap, twa_rate, current_time),
-            SettlementType::Liquidation => calculate_pnl_partial(swap, twa_rate, current_time),
+        let end_time = match settlement_type {
+            SettlementType::Normal => *swap.expiration_time,
+            SettlementType::EarlyExit => current_time,
         };
+        let base_pnl = calculate_pnl(swap, twa_rate, end_time);
 
         // Apply settlement-specific adjustments
-        let (adjusted_pnl, penalty, liquidator_bonus) = match settlement_type {
-            SettlementType::Normal => { (base_pnl, 0_u256, 0_u256) },
+        let (adjusted_pnl, penalty) = match settlement_type {
+            SettlementType::Normal => { (base_pnl, 0_u256) },
             SettlementType::EarlyExit => {
-                let penalty = Utils::calculate_fee(
-                    *swap.initial_required_margin, *params.early_exit_fee_bps,
+                let fee_bps = calculate_early_exit_fee_bps(
+                    *swap.start_time, *swap.expiration_time, current_time,
+                    *params.max_early_exit_fee_bps, *params.min_early_exit_fee_bps,
                 );
+                let penalty = Utils::calculate_fee(*swap.initial_required_margin, fee_bps);
                 let adjusted = apply_early_exit_penalty(base_pnl, penalty);
-                (adjusted, penalty, 0_u256)
-            },
-            SettlementType::Liquidation => {
-                // For liquidation, buyer loses everything
-                // Liquidator gets bonus, rest goes to pool
-                let bonus = Utils::calculate_fee(
-                    *swap.initial_required_margin, *params.liquidation_bonus_bps,
-                );
-                // Use the base PnL but the payout calculation will be different
-                (base_pnl, 0_u256, bonus)
+                (adjusted, penalty)
             },
         };
 
         // Calculate payouts
-        let (buyer_payout, lp_delta) = if settlement_type == SettlementType::Liquidation {
-            // Liquidation: buyer gets nothing, pool gets remainder after liquidator bonus
-            let remaining_to_pool = if *swap.buyer_collateral > liquidator_bonus {
-                *swap.buyer_collateral - liquidator_bonus
-            } else {
-                0
-            };
-            (0_u256, positive(remaining_to_pool))
-        } else {
-            calculate_settlement_payouts(swap, adjusted_pnl)
-        };
+        let (buyer_payout, lp_delta) = calculate_settlement_payouts(swap, adjusted_pnl);
 
         SettlementResult {
             buyer_payout,
             lp_delta,
-            liquidator_bonus,
             penalty,
             twa_rate_bps: twa_rate,
             pnl: base_pnl,
@@ -195,15 +162,8 @@ mod tests {
 
     #[test]
     fn test_calculate_pnl_fixed_side_profit() {
-        // Fixed side: pays fixed, receives floating
-        // If floating > fixed, buyer profits
-        let swap = create_test_swap(SwapSide::Fixed, 500); // 5% fixed rate
-
-        // TWA rate = 7% (700 bps) > fixed 5%
-        // Fixed payment = 1M * 5% = 50,000
-        // Floating payment = 1M * 7% = 70,000
-        // PnL = 70,000 - 50,000 = +20,000 (profit)
-        let pnl = SettlementEngine::calculate_pnl(@swap, 700);
+        let swap = create_test_swap(SwapSide::Fixed, 500);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 700, Constants::SECONDS_PER_YEAR);
 
         assert(pnl.is_negative == false, 'should be profit');
         assert(pnl.value == 20000, 'profit 20000');
@@ -211,15 +171,8 @@ mod tests {
 
     #[test]
     fn test_calculate_pnl_fixed_side_loss() {
-        // Fixed side: pays fixed, receives floating
-        // If floating < fixed, buyer loses
-        let swap = create_test_swap(SwapSide::Fixed, 700); // 7% fixed rate
-
-        // TWA rate = 5% (500 bps) < fixed 7%
-        // Fixed payment = 70,000
-        // Floating payment = 50,000
-        // PnL = 50,000 - 70,000 = -20,000 (loss)
-        let pnl = SettlementEngine::calculate_pnl(@swap, 500);
+        let swap = create_test_swap(SwapSide::Fixed, 700);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 500, Constants::SECONDS_PER_YEAR);
 
         assert(pnl.is_negative == true, 'should be loss');
         assert(pnl.value == 20000, 'loss 20000');
@@ -227,15 +180,8 @@ mod tests {
 
     #[test]
     fn test_calculate_pnl_floating_side_profit() {
-        // Floating side: pays floating, receives fixed
-        // If fixed > floating, buyer profits
-        let swap = create_test_swap(SwapSide::Floating, 700); // 7% fixed rate
-
-        // TWA rate = 5% (500 bps)
-        // Floating payment = 50,000
-        // Fixed payment = 70,000
-        // PnL = 70,000 - 50,000 = +20,000 (profit)
-        let pnl = SettlementEngine::calculate_pnl(@swap, 500);
+        let swap = create_test_swap(SwapSide::Floating, 700);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 500, Constants::SECONDS_PER_YEAR);
 
         assert(pnl.is_negative == false, 'should be profit');
         assert(pnl.value == 20000, 'profit 20000');
@@ -243,15 +189,8 @@ mod tests {
 
     #[test]
     fn test_calculate_pnl_floating_side_loss() {
-        // Floating side: pays floating, receives fixed
-        // If floating > fixed, buyer loses
-        let swap = create_test_swap(SwapSide::Floating, 500); // 5% fixed rate
-
-        // TWA rate = 7% (700 bps)
-        // Floating payment = 70,000
-        // Fixed payment = 50,000
-        // PnL = 50,000 - 70,000 = -20,000 (loss)
-        let pnl = SettlementEngine::calculate_pnl(@swap, 700);
+        let swap = create_test_swap(SwapSide::Floating, 500);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 700, Constants::SECONDS_PER_YEAR);
 
         assert(pnl.is_negative == true, 'should be loss');
         assert(pnl.value == 20000, 'loss 20000');
@@ -259,21 +198,17 @@ mod tests {
 
     #[test]
     fn test_calculate_pnl_breakeven() {
-        // Fixed rate = TWA rate = no profit/loss
         let swap = create_test_swap(SwapSide::Fixed, 500);
-
-        let pnl = SettlementEngine::calculate_pnl(@swap, 500);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 500, Constants::SECONDS_PER_YEAR);
 
         assert(pnl.value == 0, 'breakeven');
     }
 
-    // ============ calculate_pnl_partial tests ============
+    // ============ calculate_pnl partial (early exit) tests ============
 
     #[test]
     fn test_calculate_pnl_partial_half_term() {
-        let mut swap = create_test_swap(SwapSide::Fixed, 500);
-        swap.start_time = 0;
-        swap.expiration_time = Constants::SECONDS_PER_YEAR;
+        let swap = create_test_swap(SwapSide::Fixed, 500);
 
         // Exit at 6 months
         let current_time = Constants::SECONDS_PER_YEAR / 2;
@@ -282,7 +217,7 @@ mod tests {
         // Fixed payment = 1M * 5% * 0.5 = 25,000
         // Floating payment = 1M * 7% * 0.5 = 35,000
         // PnL = 35,000 - 25,000 = +10,000
-        let pnl = SettlementEngine::calculate_pnl_partial(@swap, 700, current_time);
+        let pnl = SettlementEngine::calculate_pnl(@swap, 700, current_time);
 
         assert(pnl.is_negative == false, 'should profit');
         assert(pnl.value == 10000, 'half term profit');
@@ -407,6 +342,39 @@ mod tests {
         assert(updated.locked_for_floating == 25000, 'floating unchanged');
         // Total increased by LP gain
         assert(updated.total_collateral == 1020000, 'collateral increased');
+    }
+
+    // ============ calculate_early_exit_fee_bps tests ============
+
+    #[test]
+    fn test_early_exit_fee_at_start() {
+        // At term start (elapsed = 0), fee = max_fee
+        let fee = SettlementEngine::calculate_early_exit_fee_bps(0, 1000, 0, 300, 25);
+        assert(fee == 300, 'fee = max at start');
+    }
+
+    #[test]
+    fn test_early_exit_fee_at_half() {
+        // At midpoint, fee = (max + min) / 2
+        let fee = SettlementEngine::calculate_early_exit_fee_bps(0, 1000, 500, 300, 25);
+        // range = 275, decay = 500 * 275 / 1000 = 137, fee = 300 - 137 = 163
+        // (300 + 25) / 2 = 162.5, integer math gives 163
+        assert(fee == 163, 'fee = midpoint');
+    }
+
+    #[test]
+    fn test_early_exit_fee_near_expiry() {
+        // Near expiry (90% elapsed), fee ~= min
+        let fee = SettlementEngine::calculate_early_exit_fee_bps(0, 1000, 900, 300, 25);
+        // decay = 900 * 275 / 1000 = 247, fee = 300 - 247 = 53
+        assert(fee == 53, 'fee near expiry');
+    }
+
+    #[test]
+    fn test_early_exit_fee_at_expiry() {
+        // At expiry (elapsed = total_term), fee = min_fee exactly
+        let fee = SettlementEngine::calculate_early_exit_fee_bps(0, 1000, 1000, 300, 25);
+        assert(fee == 25, 'fee = min at expiry');
     }
 
     #[test]

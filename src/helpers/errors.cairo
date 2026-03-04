@@ -7,12 +7,9 @@ pub mod Errors {
     pub const ZERO_AMOUNT: felt252 = 'Zero amount not allowed';
     pub const INVALID_PARAMS: felt252 = 'Invalid parameters';
     pub const BELOW_MIN_NOTIONAL: felt252 = 'Below min notional';
-    pub const ABOVE_MAX_NOTIONAL: felt252 = 'Above max notional';
     pub const RATE_EXCEEDS_MAX: felt252 = 'Rate exceeds max slippage';
     pub const ORACLE_STALE: felt252 = 'Oracle data is stale';
     pub const ORACLE_INVALID_RATE: felt252 = 'Oracle returned invalid rate';
-    pub const RATE_OUT_OF_BOUNDS: felt252 = 'Rate out of bounds';
-    pub const FIRST_DEPOSIT_TOO_SMALL: felt252 = 'First deposit too small';
     pub const BELOW_MIN_DEPOSIT: felt252 = 'Below minimum deposit';
     pub const INSUFFICIENT_SHARES: felt252 = 'Insufficient shares';
     pub const EXCEEDS_AVAILABLE_LIQUIDITY: felt252 = 'Exceeds available liquidity';
@@ -24,12 +21,12 @@ pub mod Errors {
     pub const EXCEEDS_MAX_UTILIZATION: felt252 = 'Exceeds max utilization';
     pub const INSUFFICIENT_LIQUIDITY: felt252 = 'Insufficient pool liquidity';
     pub const MIN_HOLD_PERIOD: felt252 = 'Min hold period not met';
-    pub const NOT_LIQUIDATABLE: felt252 = 'Position not liquidatable';
-    pub const HEALTHY_POSITION: felt252 = 'Position is healthy';
     pub const TRANSFER_FAILED: felt252 = 'Token transfer failed';
     pub const TRANSFER_FROM_FAILED: felt252 = 'Token transferFrom failed';
-    pub const LP_COOLDOWN_NOT_MET: felt252 = 'LP cooldown not met';
     pub const SWAP_EXPIRED_USE_SETTLE: felt252 = 'SWAP_EXPIRED_USE_SETTLE';
     pub const MARKET_NOT_PAUSED: felt252 = 'Market not paused';
     pub const TOKEN_NOT_WHITELISTED: felt252 = 'Token not whitelisted';
+    pub const EXCEEDS_TOTAL_UTILIZATION: felt252 = 'Exceeds total utilization';
+    pub const INVALID_SWAP_TERM: felt252 = 'Swap term out of bounds';
+    pub const NOTHING_TO_CLAIM: felt252 = 'Nothing to claim';
 }

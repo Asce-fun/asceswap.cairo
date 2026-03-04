@@ -1,8 +1,7 @@
 // Pool Accounting Library
-// Pure functions for share calculations, collateral locking/unlocking, and pool state transitions
+// Pure functions for collateral locking/unlocking and pool state transitions
 
 pub mod PoolAccounting {
-    use crate::helpers::fixed_point::mul_div_down;
     use crate::helpers::signed_value::apply_pnl;
     use crate::types::asce_swap::{LpPool, SignedValue, SwapSide};
 
@@ -41,26 +40,6 @@ pub mod PoolAccounting {
     pub fn calculate_available_liquidity(pool: @LpPool) -> u256 {
         *pool.total_collateral - *pool.locked_for_fixed - *pool.locked_for_floating
     }
-
-    /// Calculate LP shares to mint (round DOWN - user gets less)
-    pub fn calculate_shares_to_mint(
-        deposit: u256, total_shares: u256, total_collateral: u256,
-    ) -> u256 {
-        if total_shares == 0 || total_collateral == 0 {
-            return deposit;
-        }
-        mul_div_down(deposit, total_shares, total_collateral)
-    }
-
-    /// Calculate collateral for LP withdrawal (round DOWN - user gets less)
-    pub fn calculate_withdrawal_amount(
-        shares: u256, total_shares: u256, total_collateral: u256,
-    ) -> u256 {
-        if total_shares == 0 {
-            return 0;
-        }
-        mul_div_down(shares, total_collateral, total_shares)
-    }
 }
 
 
@@ -79,68 +58,6 @@ mod tests {
             total_shares: 1000000,
         }
     }
-
-    #[test]
-    fn test_shares_to_mint_first_deposit() {
-        // First deposit: 1:1 ratio
-        let shares = PoolAccounting::calculate_shares_to_mint(1000, 0, 0);
-        assert(shares == 1000, 'first deposit 1:1');
-    }
-
-    #[test]
-    fn test_shares_to_mint_proportional() {
-        // Pool has 1000 shares, 2000 collateral (2:1 ratio)
-        // Deposit 1000 collateral -> get 500 shares
-        let shares = PoolAccounting::calculate_shares_to_mint(1000, 1000, 2000);
-        assert(shares == 500, 'proportional shares');
-    }
-
-    #[test]
-    fn test_shares_to_mint_equal_ratio() {
-        // Pool has 1000 shares, 1000 collateral (1:1)
-        // Deposit 500 -> get 500
-        let shares = PoolAccounting::calculate_shares_to_mint(500, 1000, 1000);
-        assert(shares == 500, 'equal ratio');
-    }
-
-    #[test]
-    fn test_shares_to_mint_profitable_pool() {
-        // Pool has 1000 shares, 1500 collateral (pool made profit)
-        // Deposit 1500 -> get 1000 shares
-        let shares = PoolAccounting::calculate_shares_to_mint(1500, 1000, 1500);
-        assert(shares == 1000, 'profitable pool');
-    }
-
-
-    #[test]
-    fn test_withdrawal_amount_proportional() {
-        // 500 shares out of 1000 total, 2000 collateral
-        // Should get 1000 collateral
-        let amount = PoolAccounting::calculate_withdrawal_amount(500, 1000, 2000);
-        assert(amount == 1000, 'withdrawal proportional');
-    }
-
-    #[test]
-    fn test_withdrawal_amount_all_shares() {
-        // Withdraw all shares
-        let amount = PoolAccounting::calculate_withdrawal_amount(1000, 1000, 2000);
-        assert(amount == 2000, 'withdraw all');
-    }
-
-    #[test]
-    fn test_withdrawal_amount_zero_shares() {
-        // Zero shares = zero withdrawal
-        let amount = PoolAccounting::calculate_withdrawal_amount(0, 1000, 2000);
-        assert(amount == 0, 'zero shares');
-    }
-
-    #[test]
-    fn test_withdrawal_amount_empty_pool() {
-        // Edge case: no shares in pool
-        let amount = PoolAccounting::calculate_withdrawal_amount(100, 0, 2000);
-        assert(amount == 0, 'empty pool');
-    }
-
 
     #[test]
     fn test_lock_collateral_fixed() {
@@ -244,4 +161,3 @@ mod tests {
         assert(available == 0, 'none available');
     }
 }
-

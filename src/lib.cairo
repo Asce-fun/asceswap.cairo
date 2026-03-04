@@ -1,5 +1,6 @@
 pub mod components {
     pub mod Analytics;
+    pub mod ERC6909;
     pub mod LiquidityManager;
     pub mod MarketManager;
     pub mod Security;
@@ -11,6 +12,8 @@ pub mod interfaces {
     pub mod analytics;
     pub mod asce_swap;
     pub mod erc20;
+    pub mod erc6909;
+    pub mod position_manager;
     pub mod rate_oracle;
     pub mod security;
 }
@@ -43,5 +46,9 @@ pub mod analytics;
 
 pub mod asceswap;
 
-// Enhanced mock contracts for testnet deployment (faucet tokens + rate oracles)
-pub mod mock;
+pub mod position_manager;
+
+pub mod mock{
+    pub mod mock_token;
+    pub mod mock_rate_oracle;
+}

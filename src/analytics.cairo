@@ -10,11 +10,14 @@ pub mod Analytics {
     use core::num::traits::Zero;
     use starknet::ContractAddress;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::get_block_timestamp;
     use crate::interfaces::analytics::IAnalytics;
     use crate::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
+    use crate::interfaces::erc6909::{IERC6909Dispatcher, IERC6909DispatcherTrait};
+    use crate::libraries::settlement_engine::SettlementEngine;
     use crate::types::analytics::{
         DashboardPageData, DetailedScenario, LpPageData, MarketForLp, MarketForTrading,
-        MarketsPageData, SwapDetailData, SwapScenarioAnalysis, UserLpPositions,
+        MarketsPageData, SwapDetailData, SwapScenarioAnalysis,
     };
     use crate::types::asce_swap::{MarketStatus, SignedValue, SwapSide, SwapStatus};
 
@@ -36,21 +39,6 @@ pub mod Analytics {
 
     #[abi(embed_v0)]
     impl AnalyticsImpl of IAnalytics<ContractState> {
-        /// Get complete user dashboard with automatic ID discovery
-        /// Just pass the user address - fetches all swap IDs and LP positions automatically
-        fn get_user_dashboard_full(
-            self: @ContractState, user: ContractAddress,
-        ) -> DashboardPageData {
-            let asce_swap = self._get_dispatcher();
-
-            // Automatically fetch user's swap IDs and LP pair IDs from main contract
-            let swap_ids = asce_swap.get_user_swap_ids(user);
-            let lp_pair_ids = asce_swap.get_user_lp_pair_ids(user);
-
-            // Delegate to the main dashboard function
-            self.get_dashboard_page(user, swap_ids, lp_pair_ids)
-        }
-
         /// Get all data needed for user dashboard page (with explicit IDs)
         /// Use this if you already have the IDs from an indexer
         fn get_dashboard_page(
@@ -74,7 +62,6 @@ pub mod Analytics {
             let mut fixed_positions: u32 = 0;
             let mut floating_positions: u32 = 0;
             let mut positions_at_risk: u32 = 0;
-            let mut has_liquidatable: bool = false;
             let mut expiring_soon_count: u32 = 0;
             let mut total_health: u256 = 0;
             let mut active_count: u32 = 0;
@@ -98,11 +85,6 @@ pub mod Analytics {
                     // Check health
                     if swap.health_factor_bps < AT_RISK_THRESHOLD_BPS {
                         positions_at_risk += 1;
-                    }
-
-                    // Check if liquidatable (health < 100%)
-                    if swap.health_factor_bps < 10000 {
-                        has_liquidatable = true;
                     }
 
                     // Check expiring soon
@@ -148,7 +130,6 @@ pub mod Analytics {
                 total_lp_share_percentage_bps,
                 swap_positions: swap_summaries,
                 lp_positions: lp_summaries,
-                has_liquidatable_positions: has_liquidatable,
                 has_expiring_soon: expiring_soon_count > 0,
                 expiring_soon_count,
             }
@@ -159,6 +140,7 @@ pub mod Analytics {
             self: @ContractState, user: ContractAddress, market_pair_ids: Span<felt252>,
         ) -> LpPageData {
             let asce_swap = self._get_dispatcher();
+            let erc6909 = self._get_erc6909_dispatcher();
 
             let mut markets: Array<MarketForLp> = array![];
             let mut total_protocol_tvl: u256 = 0;
@@ -175,11 +157,9 @@ pub mod Analytics {
                 let market = asce_swap.get_market(pair_id);
                 let pool_analytics = asce_swap.get_pool_analytics(pair_id);
 
-                // Get user's position in this market
-                let lp_position = asce_swap.get_lp_position(user, pair_id);
-                let user_share_value = asce_swap
-                    .convert_to_assets_for_lp(lp_position.shares, pair_id);
-                let user_can_withdraw = asce_swap.is_cooldown_met(user, pair_id);
+                // Get user's position in this market via ERC6909 balance
+                let user_shares = erc6909.balance_of(user, pair_id.into());
+                let user_share_value = asce_swap.convert_to_assets(pair_id, user_shares);
 
                 // Calculate utilization
                 let utilization_bps = if pool_analytics.total_value > 0 {
@@ -198,12 +178,12 @@ pub mod Analytics {
                     available_liquidity: pool_analytics.available_liquidity,
                     utilization_bps,
                     current_rate_bps: market.rate_index.last_rate_bps,
-                    fee_spread_bps: market.params.fee_spread_bps,
+                    base_fee_spread_bps: market.params.base_fee_spread_bps,
                     net_exposure: pool_analytics.net_exposure_notional,
                     active_swaps: market.active_swap_count,
-                    user_shares: lp_position.shares,
+                    user_shares,
                     user_share_value,
-                    user_can_withdraw,
+                    user_can_withdraw: true,
                 };
 
                 markets.append(market_for_lp);
@@ -215,7 +195,7 @@ pub mod Analytics {
                     total_active_markets += 1;
                 }
 
-                if lp_position.shares > 0 {
+                if user_shares > 0 {
                     total_user_lp_value += user_share_value;
                     total_user_positions += 1;
 
@@ -242,68 +222,6 @@ pub mod Analytics {
                 total_protocol_tvl,
                 total_active_markets,
             }
-        }
-
-        /// Get user's LP positions automatically (only markets where user has LP)
-        fn get_user_lp_positions(self: @ContractState, user: ContractAddress) -> UserLpPositions {
-            let asce_swap = self._get_dispatcher();
-
-            // Auto-fetch user's LP pair IDs from main contract
-            let lp_pair_ids = asce_swap.get_user_lp_pair_ids(user);
-
-            let mut positions: Array<MarketForLp> = array![];
-            let mut total_lp_value: u256 = 0;
-            let mut total_positions: u32 = 0;
-
-            let mut i: u32 = 0;
-            let len = lp_pair_ids.len();
-            while i < len {
-                let pair_id = *lp_pair_ids.at(i);
-                let market = asce_swap.get_market(pair_id);
-                let pool_analytics = asce_swap.get_pool_analytics(pair_id);
-
-                // Get user's position in this market
-                let lp_position = asce_swap.get_lp_position(user, pair_id);
-
-                // Only include if user actually has shares
-                if lp_position.shares > 0 {
-                    let user_share_value = asce_swap
-                        .convert_to_assets_for_lp(lp_position.shares, pair_id);
-                    let user_can_withdraw = asce_swap.is_cooldown_met(user, pair_id);
-
-                    let utilization_bps = if pool_analytics.total_value > 0 {
-                        ((pool_analytics.total_value - pool_analytics.available_liquidity) * 10000)
-                            / pool_analytics.total_value
-                    } else {
-                        0
-                    };
-
-                    let market_for_lp = MarketForLp {
-                        pair_id,
-                        status: market.status,
-                        collateral_token: market.collateral_token,
-                        decimals: market.decimals,
-                        total_tvl: pool_analytics.total_value,
-                        available_liquidity: pool_analytics.available_liquidity,
-                        utilization_bps,
-                        current_rate_bps: market.rate_index.last_rate_bps,
-                        fee_spread_bps: market.params.fee_spread_bps,
-                        net_exposure: pool_analytics.net_exposure_notional,
-                        active_swaps: market.active_swap_count,
-                        user_shares: lp_position.shares,
-                        user_share_value,
-                        user_can_withdraw,
-                    };
-
-                    positions.append(market_for_lp);
-                    total_lp_value += user_share_value;
-                    total_positions += 1;
-                }
-
-                i += 1;
-            }
-
-            UserLpPositions { user, total_lp_value, total_positions, positions: positions.span() }
         }
 
         /// Get all data needed for markets/trading page
@@ -334,11 +252,21 @@ pub mod Analytics {
                 }
 
                 // Get quotes for both sides to show rates
-                // Use min_notional as a reference amount
+                // Use min_notional_per_swap and max_swap_term as reference
                 let fixed_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Fixed, market.params.min_notional);
+                    .get_swap_quote(
+                        pair_id,
+                        SwapSide::Fixed,
+                        market.params.min_notional_per_swap,
+                        market.params.max_swap_term_seconds,
+                    );
                 let floating_quote = asce_swap
-                    .get_swap_quote(pair_id, SwapSide::Floating, market.params.min_notional);
+                    .get_swap_quote(
+                        pair_id,
+                        SwapSide::Floating,
+                        market.params.min_notional_per_swap,
+                        market.params.max_swap_term_seconds,
+                    );
 
                 let market_for_trading = MarketForTrading {
                     pair_id,
@@ -353,11 +281,12 @@ pub mod Analytics {
                     total_liquidity: pool_analytics.total_value,
                     total_swaps_created: market.total_swaps_created,
                     active_swap_count: market.active_swap_count,
-                    swap_term_seconds: market.params.swap_term_seconds,
-                    min_notional: market.params.min_notional,
-                    max_notional_per_swap: market.params.max_notional_per_swap,
+                    min_swap_term_seconds: market.params.min_swap_term_seconds,
+                    max_swap_term_seconds: market.params.max_swap_term_seconds,
+                    min_notional_per_swap: market.params.min_notional_per_swap,
                     swap_fee_bps: market.params.swap_fee_bps,
-                    early_exit_fee_bps: market.params.early_exit_fee_bps,
+                    max_early_exit_fee_bps: market.params.max_early_exit_fee_bps,
+                    min_early_exit_fee_bps: market.params.min_early_exit_fee_bps,
                 };
 
                 markets.append(market_for_trading);
@@ -390,8 +319,13 @@ pub mod Analytics {
             // For now, we'll use a zero address placeholder - the main contract should expose this
             let owner: ContractAddress = Zero::zero();
 
-            // Calculate early exit info
-            let early_exit_fee = (swap.buyer_collateral * market.params.early_exit_fee_bps) / 10000;
+            // Calculate early exit info with time-decaying fee
+            let current_time = get_block_timestamp();
+            let fee_bps = SettlementEngine::calculate_early_exit_fee_bps(
+                swap.start_time, swap.expiration_time, current_time,
+                market.params.max_early_exit_fee_bps, market.params.min_early_exit_fee_bps,
+            );
+            let early_exit_fee = (swap.buyer_collateral * fee_bps) / 10000;
             let early_exit_payout = if swap_analytics.current_pnl.is_negative {
                 let loss = if swap_analytics.current_pnl.value > swap.buyer_collateral {
                     swap.buyer_collateral
@@ -432,7 +366,6 @@ pub mod Analytics {
                 breakeven_rate_bps: breakeven_rate,
                 health_factor_bps: health_status.health_factor_bps,
                 required_margin: health_status.required_margin,
-                is_liquidatable: health_status.is_liquidatable,
                 start_time: swap.start_time,
                 expiration_time: swap.expiration_time,
                 elapsed_seconds: swap_analytics.elapsed_seconds,
@@ -557,6 +490,10 @@ pub mod Analytics {
     impl InternalImpl of InternalTrait {
         fn _get_dispatcher(self: @ContractState) -> IAsceSwapDispatcher {
             IAsceSwapDispatcher { contract_address: self.asce_swap_contract.read() }
+        }
+
+        fn _get_erc6909_dispatcher(self: @ContractState) -> IERC6909Dispatcher {
+            IERC6909Dispatcher { contract_address: self.asce_swap_contract.read() }
         }
     }
 }

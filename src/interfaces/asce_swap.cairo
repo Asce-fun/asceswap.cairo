@@ -1,6 +1,6 @@
 use starknet::ContractAddress;
 use crate::types::asce_swap::{
-    HealthStatus, LpAnalytics, LpPosition, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
+    HealthStatus, LpAnalytics, MarketPair, MarketParams, PoolAnalytics, ProtocolConfig,
     ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard, UserLpSummary,
     UserSwapSummary,
 };
@@ -35,13 +35,64 @@ pub trait IAsceSwap<TContractState> {
         ref self: TContractState, token: ContractAddress, amount: u256, recipient: ContractAddress,
     );
 
-    /// Deposit collateral to LP pool
-    fn supply_lp_collateral(ref self: TContractState, pair_id: felt252, amount: u256) -> u256;
 
-    /// Withdraw collateral from LP pool
-    fn withdraw_lp_collateral(ref self: TContractState, pair_id: felt252, shares: u256) -> u256;
+    /// Deposit assets into a market pool, mint shares to receiver
+    fn deposit(
+        ref self: TContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
+    ) -> u256;
 
-    /// Buy a new swap position
+    /// Mint exact shares, pull required assets from caller
+    fn mint(
+        ref self: TContractState, pair_id: felt252, shares: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Redeem shares from a market pool, send assets to receiver
+    fn redeem(
+        ref self: TContractState, pair_id: felt252, shares: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Withdraw exact assets, burn required shares from caller
+    fn withdraw(
+        ref self: TContractState, pair_id: felt252, assets: u256, receiver: ContractAddress,
+    ) -> u256;
+
+    /// Total assets held by the vault for a market
+    fn total_assets(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Exchange rate for LP shares
+    fn exchange_rate(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Convert assets to shares
+    fn convert_to_shares(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Convert shares to assets
+    fn convert_to_assets(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview deposit: how many shares for a given deposit
+    fn preview_deposit(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Preview mint: how many assets needed to mint exact shares (rounds up)
+    fn preview_mint(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview redeem: how many assets for burning shares
+    fn preview_redeem(self: @TContractState, pair_id: felt252, shares: u256) -> u256;
+
+    /// Preview withdraw: how many shares needed to withdraw exact assets (rounds up)
+    fn preview_withdraw(self: @TContractState, pair_id: felt252, assets: u256) -> u256;
+
+    /// Max deposit (no hard cap)
+    fn max_deposit(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Max mint (no hard cap)
+    fn max_mint(self: @TContractState, pair_id: felt252) -> u256;
+
+    /// Max assets owner can withdraw
+    fn max_withdraw(self: @TContractState, owner: ContractAddress, pair_id: felt252) -> u256;
+
+    /// Max shares owner can redeem
+    fn max_redeem(self: @TContractState, owner: ContractAddress, pair_id: felt252) -> u256;
+
+    /// Buy a new swap position (caller pays, receiver gets the position NFT)
     fn buy_swap(
         ref self: TContractState,
         pair_id: felt252,
@@ -49,16 +100,20 @@ pub trait IAsceSwap<TContractState> {
         notional: u256,
         collateral: u256,
         max_rate_bps: u256,
+        swap_term: u64,
+        receiver: ContractAddress,
     ) -> u256;
 
     /// Settle an expired swap
     fn settle_swap(ref self: TContractState, swap_id: u256);
 
+    /// Claim payout from a settled swap (NFT owner only)
+    fn claim(ref self: TContractState, swap_id: u256);
+
     /// Early exit from a swap (before expiration)
     fn early_exit(ref self: TContractState, swap_id: u256);
 
-    /// Liquidate an unhealthy position
-    fn liquidate(ref self: TContractState, swap_id: u256);
+    // === Market Views ===
 
     /// Get market pair info
     fn get_market(self: @TContractState, pair_id: felt252) -> MarketPair;
@@ -66,28 +121,13 @@ pub trait IAsceSwap<TContractState> {
     /// Get swap info
     fn get_swap(self: @TContractState, swap_id: u256) -> Swap;
 
-    /// Get swap quote (preview rate and requirements)
+    /// Get swap quote (preview rate and requirements for a given term)
     fn get_swap_quote(
-        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256,
+        self: @TContractState, pair_id: felt252, side: SwapSide, notional: u256, swap_term: u64,
     ) -> SwapQuote;
-
-    fn balance_of_lp(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> u256;
-
-    fn is_cooldown_met(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> bool;
 
     /// Get health status of a swap
     fn get_health_status(self: @TContractState, swap_id: u256) -> HealthStatus;
-
-    fn exchange_rate_for_lp(self: @TContractState, pair_id: felt252) -> u256;
-    fn convert_to_shares_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-    fn convert_to_assets_for_lp(self: @TContractState, shares: u256, pair_id: felt252) -> u256;
-
-
-    fn preview_deposit_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-    fn preview_withdraw_for_lp(self: @TContractState, assets: u256, pair_id: felt252) -> u256;
-
-    /// Get LP position
-    fn get_lp_position(self: @TContractState, lp: ContractAddress, pair_id: felt252) -> LpPosition;
 
     /// Get pool analytics
     fn get_pool_analytics(self: @TContractState, pair_id: felt252) -> PoolAnalytics;
@@ -101,6 +141,7 @@ pub trait IAsceSwap<TContractState> {
     /// Get next swap ID
     fn get_next_swap_id(self: @TContractState) -> u256;
 
+    // === Analytics ===
 
     /// Get comprehensive swap analytics (for frontend dashboard)
     fn get_swap_analytics(self: @TContractState, swap_id: u256) -> SwapAnalytics;
@@ -135,21 +176,6 @@ pub trait IAsceSwap<TContractState> {
         self: @TContractState, user: ContractAddress, pair_ids: Span<felt252>,
     ) -> Span<UserLpSummary>;
 
-    // ============================================================
-    // TODO [MAINNET]: Replace with off-chain indexer
-    // These use on-chain arrays which don't scale well.
-    // ============================================================
-    /// Get all swap IDs owned by a user
-    fn get_user_swap_ids(self: @TContractState, user: ContractAddress) -> Span<u256>;
-
-    /// Get all LP pair IDs where user has a position
-    fn get_user_lp_pair_ids(self: @TContractState, user: ContractAddress) -> Span<felt252>;
-
-    /// Get count of user's swaps
-    fn get_user_swap_count(self: @TContractState, user: ContractAddress) -> u32;
-
-    /// Get count of user's LP positions
-    fn get_user_lp_count(self: @TContractState, user: ContractAddress) -> u32;
     fn poke_rate_index(ref self: TContractState, pair_id: felt252);
 
     /// Whitelist a token for use as collateral

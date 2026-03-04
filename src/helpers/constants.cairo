@@ -10,41 +10,44 @@ pub mod Constants {
     /// Seconds in a year (for annualized rate calculations)
     pub const SECONDS_PER_YEAR: u64 = 31_536_000;
 
-    /// Minimum shares burned on first LP deposit (prevents inflation attack)
-    pub const MIN_BURNED_SHARES: u256 = 1_000;
-
     /// Minimum LP deposit amount
     pub const MIN_LP_DEPOSIT: u256 = 1_000;
 
-    /// Default minimum first LP deposit
-    pub const DEFAULT_MIN_FIRST_LP_DEPOSIT: u256 = 10_000;
-
-    /// Minimum liquidation threshold (50%)
-    pub const MIN_LIQUIDATION_THRESHOLD_BPS: u256 = 5_000;
-
-    /// Maximum liquidation threshold (95%)
-    pub const MAX_LIQUIDATION_THRESHOLD_BPS: u256 = 9_500;
-
-    /// Minimum swap term (1 hour)
+    /// Minimum swap term (1 hour) — prevents flash swap attacks
     pub const MIN_SWAP_TERM_SECONDS: u64 = 3_600;
-
-    /// Maximum swap term (1 year)
-    pub const MAX_SWAP_TERM_SECONDS: u64 = 31_536_000;
 
     /// Maximum fee (10%)
     pub const MAX_FEE_BPS: u256 = 1_000;
 
-    /// Maximum rate bound (10000% APY)
-    pub const MAX_RATE_BOUND_BPS: u256 = 1_000_000;
-
-    /// Maximum utilization per side (85%)
-    pub const MAX_UTILIZATION_CAP_BPS: u256 = 8_500;
-
-    pub const MIN_LP_COOLDOWN_SECONDS: u64 = 3_600;
-
     pub const MIN_MARGIN_MULTIPLIER_BPS: u256 = 10000; // 100%
 
     pub const MAX_MARGIN_MULTIPLIER_BPS: u256 = 12500; //125%
+
+    /// Minimum margin floor (5%) — prevents margin from decaying to zero near expiry
+    pub const MIN_MARGIN_FLOOR_BPS: u256 = 500;
+
+    /// Maximum total utilization across both sides (95%) — safety valve
+    pub const MAX_TOTAL_UTILIZATION_CAP_BPS: u256 = 9_500;
+
+    /// Demand spread curve — Tier 1 boundary (20% ratio)
+    pub const DEMAND_SPREAD_TIER1_END_RATIO: u256 = 2_000;
+    /// Demand spread curve — Tier 2 boundary (50% ratio)
+    pub const DEMAND_SPREAD_TIER2_END_RATIO: u256 = 5_000;
+
+    /// Demand spread curve — Tier 1 max spread (1% = 100 bps)
+    pub const DEMAND_SPREAD_TIER1_END_SPREAD: u256 = 100;
+    /// Demand spread curve — Tier 2 max spread (5% = 500 bps)
+    pub const DEMAND_SPREAD_TIER2_END_SPREAD: u256 = 500;
+    /// Demand spread curve — Tier 3 max spread / cap (30% = 3000 bps)
+    pub const DEMAND_SPREAD_MAX_SPREAD: u256 = 3_000;
+
+    /// Minimum demand_spread_factor (0.5x)
+    pub const MIN_DEMAND_SPREAD_FACTOR: u256 = 5_000;
+    /// Maximum demand_spread_factor (5x)
+    pub const MAX_DEMAND_SPREAD_FACTOR: u256 = 50_000;
+
+    /// Minimum oracle staleness window (60 seconds)
+    pub const MIN_ORACLE_STALENESS_SECONDS: u64 = 60;
 
 
     pub fn USDC() -> ContractAddress {

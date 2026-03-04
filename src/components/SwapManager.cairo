@@ -7,7 +7,7 @@ pub mod SwapManagerComponent {
     use starknet::{ContractAddress, get_block_timestamp};
     use crate::helpers::constants::Constants;
     use crate::helpers::errors::Errors;
-    use crate::helpers::fixed_point::mul_div_up;
+    use crate::helpers::fixed_point::{mul_div_down, mul_div_up};
     use crate::helpers::signed_value::apply_pnl;
     use crate::helpers::utils::Utils;
     use crate::libraries::health_calculator::HealthCal;
@@ -17,6 +17,7 @@ pub mod SwapManagerComponent {
         HealthStatus, LpPool, MarketPair, MarketParams, RateIndex, SettlementResult, SettlementType,
         SignedValue, Swap, SwapQuote, SwapSide, SwapStatus,
     };
+
 
     #[storage]
     pub struct Storage {
@@ -30,7 +31,6 @@ pub mod SwapManagerComponent {
         SwapCreated: SwapCreated,
         SwapSettled: SwapSettled,
         SwapExitedEarly: SwapExitedEarly,
-        SwapLiquidated: SwapLiquidated,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -56,8 +56,6 @@ pub mod SwapManagerComponent {
         pub swap_id: u256,
         #[key]
         pub pair_id: felt252,
-        #[key]
-        pub owner: ContractAddress,
         pub twa_rate_bps: u256,
         pub pnl: SignedValue,
         pub buyer_payout: u256,
@@ -76,21 +74,6 @@ pub mod SwapManagerComponent {
         pub pnl: SignedValue,
         pub penalty: u256,
         pub buyer_payout: u256,
-        pub timestamp: u64,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct SwapLiquidated {
-        #[key]
-        pub swap_id: u256,
-        #[key]
-        pub pair_id: felt252,
-        #[key]
-        pub owner: ContractAddress,
-        pub liquidator: ContractAddress,
-        pub health_factor_bps: u256,
-        pub liquidator_bonus: u256,
-        pub remaining_to_pool: u256,
         pub timestamp: u64,
     }
 
@@ -117,47 +100,51 @@ pub mod SwapManagerComponent {
             notional: u256,
             collateral: u256,
             max_rate_bps: u256,
+            swap_term: u64,
             caller: ContractAddress,
             market: @MarketPair,
             oracle_rate: u256,
             protocol_fee_share_bps: u256,
         ) -> (u256, LpPool, u256, u256) {
-            // Validate
-            assert(notional >= *market.params.min_notional, Errors::BELOW_MIN_NOTIONAL);
-            assert(notional <= *market.params.max_notional_per_swap, Errors::ABOVE_MAX_NOTIONAL);
-            //@audit: shouldn't collateral amount be a factor of notional amount ?
-            // assert(collateral > 0, Errors::ZERO_AMOUNT);
+
+            assert(notional >= *market.params.min_notional_per_swap, Errors::BELOW_MIN_NOTIONAL);
 
             assert(
-                notional <= collateral * *market.params.initial_margin_multiplier_bps,
-                'Exceeds max leverage',
+                swap_term >= *market.params.min_swap_term_seconds
+                    && swap_term <= *market.params.max_swap_term_seconds,
+                Errors::INVALID_SWAP_TERM,
             );
 
             let current_time = get_block_timestamp();
 
-            // Calculate swap rate (base + imbalance + feeSpread)
-            let (final_rate, _adjustment, _is_positive) = RateEngine::calculate_swap_rate(
-                market.pool, market.params, side, oracle_rate,
+            let (final_rate, _demand_spread, _is_crowded) = RateEngine::calculate_swap_rate(
+                market.pool, market.params, side, oracle_rate, notional,
             );
 
             // Slippage check
             assert(final_rate <= max_rate_bps, Errors::RATE_EXCEEDS_MAX);
 
-            // Calculate requirements
-            let term_seconds = *market.params.swap_term_seconds;
-            // total margin required to lock (notional * rate * terms * buffer)
-            let required_margin = HealthCal::calculate_required_margin(
-                notional, final_rate, term_seconds, *market.params.initial_margin_multiplier_bps,
+            // max_exposure = the most that can flow between buyer and LP
+            let max_exposure = HealthCal::calculate_max_exposure(notional, final_rate, swap_term);
+
+            let required_margin = mul_div_up(
+                max_exposure, *market.params.initial_margin_multiplier_bps, Constants::BPS,
             );
 
-            // LP must lock same amount
-            let lp_collateral_needed = required_margin;
+            let lp_collateral_needed = max_exposure;
 
-            // Calculate fees
-            let swap_fee = Utils::calculate_fee(collateral, *market.params.swap_fee_bps);
-            let protocol_portion = Utils::calculate_fee(swap_fee, protocol_fee_share_bps);
-            let lp_fee_portion = swap_fee - protocol_portion;
-            let net_collateral = collateral - swap_fee;
+            // Calculate fees on max_exposure (deterministic per position)
+            let (net_collateral, lp_fee_portion, protocol_portion) = match *market
+                .params
+                .swap_fee_bps {
+                0 => { (collateral, 0, 0) },
+                _ => {
+                    let swap_fee = Utils::calculate_fee(max_exposure, *market.params.swap_fee_bps);
+                    let protocol_portion = Utils::calculate_fee(swap_fee, protocol_fee_share_bps);
+                    let lp_fee_portion = swap_fee - protocol_portion;
+                    (collateral - swap_fee, lp_fee_portion, protocol_portion)
+                },
+            };
 
             assert(net_collateral >= required_margin, Errors::INSUFFICIENT_COLLATERAL);
 
@@ -168,15 +155,16 @@ pub mod SwapManagerComponent {
                 - pool.locked_for_floating;
             assert(available >= lp_collateral_needed, Errors::INSUFFICIENT_LIQUIDITY);
 
-            // Check utilization cap
-            let locked_for_side = match side {
-                SwapSide::Fixed => pool.locked_for_fixed,
-                SwapSide::Floating => pool.locked_for_floating,
-            };
-            let new_locked = locked_for_side + lp_collateral_needed;
-            let utilization = mul_div_up(new_locked, Constants::BPS, pool.total_collateral);
+            // Check combined utilization (both sides)
+            let total_locked_new = pool.locked_for_fixed
+                + pool.locked_for_floating
+                + lp_collateral_needed;
+            let total_utilization = mul_div_up(
+                total_locked_new, Constants::BPS, pool.total_collateral,
+            );
             assert(
-                utilization <= *market.params.max_utilization_bps, Errors::EXCEEDS_MAX_UTILIZATION,
+                total_utilization <= *market.params.max_total_utilization_bps,
+                Errors::EXCEEDS_TOTAL_UTILIZATION,
             );
 
             // Create swap
@@ -194,7 +182,7 @@ pub mod SwapManagerComponent {
                 lp_collateral_locked: lp_collateral_needed,
                 initial_required_margin: required_margin,
                 start_time: current_time,
-                expiration_time: current_time + term_seconds,
+                expiration_time: current_time + swap_term,
                 start_cumulative_rate: (*market.rate_index).cumulative_rate_time,
             };
 
@@ -212,7 +200,6 @@ pub mod SwapManagerComponent {
 
             pool.total_collateral = pool.total_collateral + lp_fee_portion;
 
-            // Transfer collateral - done by main contract
 
             self
                 .emit(
@@ -225,7 +212,7 @@ pub mod SwapManagerComponent {
                         fixed_rate_bps: final_rate,
                         buyer_collateral: net_collateral,
                         lp_collateral_locked: lp_collateral_needed,
-                        expiration_time: current_time + term_seconds,
+                        expiration_time: current_time + swap_term,
                         timestamp: current_time,
                     },
                 );
@@ -240,7 +227,6 @@ pub mod SwapManagerComponent {
             ref self: ComponentState<TContractState>,
             swap_id: u256,
             swap: Swap,
-            owner: ContractAddress,
             market: @MarketPair,
         ) -> (LpPool, SettlementResult) {
             // is swap active
@@ -249,7 +235,7 @@ pub mod SwapManagerComponent {
             let current_time = get_block_timestamp();
             assert(current_time >= swap.expiration_time, Errors::SWAP_NOT_EXPIRED);
 
-            // Process settlement using SettlementEngine (pass snapshot)
+            // Process settlement using SettlementEngine 
             let result = SettlementEngine::process_settlement(
                 @swap, market.rate_index, market.params, SettlementType::Normal, current_time,
             );
@@ -267,7 +253,6 @@ pub mod SwapManagerComponent {
                     SwapSettled {
                         swap_id,
                         pair_id: swap.pair_id,
-                        owner,
                         twa_rate_bps: result.twa_rate_bps,
                         pnl: result.pnl,
                         buyer_payout: result.buyer_payout,
@@ -330,65 +315,12 @@ pub mod SwapManagerComponent {
             (pool, result)
         }
 
-        /// Liquidate an unhealthy swap
-        /// Returns (updated_pool, settlement_result, health_status)
-        /// Accepts swap by value to avoid redundant storage read
-        fn liquidate(
-            ref self: ComponentState<TContractState>,
-            swap_id: u256,
-            swap: Swap,
-            liquidator: ContractAddress,
-            owner: ContractAddress,
-            market: @MarketPair,
-        ) -> (LpPool, SettlementResult, HealthStatus) {
-            // Validate swap (no storage read needed)
-            assert(swap.status == SwapStatus::Active, Errors::SWAP_NOT_ACTIVE);
-
-            let current_time = get_block_timestamp();
-            assert(current_time < swap.expiration_time, Errors::SWAP_EXPIRED_USE_SETTLE);
-
-            // Check health (use snapshot)
-            let health_status = self.calculate_health_status(@swap, market, current_time);
-            assert(health_status.is_liquidatable, Errors::HEALTHY_POSITION);
-
-            // Process settlement using SettlementEngine (pass snapshot)
-            let result = SettlementEngine::process_settlement(
-                @swap, market.rate_index, market.params, SettlementType::Liquidation, current_time,
-            );
-
-            // Update pool (use snapshot)
-            let pool = SettlementEngine::finalize_pool_state(*market.pool, @swap, result.lp_delta);
-
-            let remaining_to_pool = result.lp_delta.value;
-
-            // Update swap status and write back
-            let mut swap = swap;
-            swap.status = SwapStatus::Liquidated;
-            self.swaps.write(swap_id, swap);
-
-            self
-                .emit(
-                    SwapLiquidated {
-                        swap_id,
-                        pair_id: swap.pair_id,
-                        owner,
-                        liquidator,
-                        health_factor_bps: health_status.health_factor_bps,
-                        liquidator_bonus: result.liquidator_bonus,
-                        remaining_to_pool,
-                        timestamp: current_time,
-                    },
-                );
-
-            (pool, result, health_status)
-        }
-
         /// Get a swap
         fn get_swap(self: @ComponentState<TContractState>, swap_id: u256) -> Swap {
             self.swaps.read(swap_id)
         }
 
-        /// Get swap quote
+        /// Get swap quote for a given term
         fn get_swap_quote(
             self: @ComponentState<TContractState>,
             pool: @LpPool,
@@ -396,26 +328,35 @@ pub mod SwapManagerComponent {
             side: SwapSide,
             notional: u256,
             oracle_rate: u256,
+            swap_term: u64,
         ) -> SwapQuote {
-            let (final_rate, adjustment, is_positive) = RateEngine::calculate_swap_rate(
-                pool, params, side, oracle_rate,
+            let (final_rate, demand_spread, is_crowded) = RateEngine::calculate_swap_rate(
+                pool, params, side, oracle_rate, notional,
             );
 
-            let required_collateral = HealthCal::calculate_required_margin(
-                notional,
-                final_rate,
-                *params.swap_term_seconds,
-                *params.initial_margin_multiplier_bps,
+            let max_exposure = HealthCal::calculate_max_exposure(notional, final_rate, swap_term);
+            let required_collateral = mul_div_up(
+                max_exposure, *params.initial_margin_multiplier_bps, Constants::BPS,
             );
+
+            // Compute current utilization for the quote
+            let total_locked = *pool.locked_for_fixed + *pool.locked_for_floating;
+            let current_utilization_bps = if *pool.total_collateral > 0 {
+                mul_div_down(total_locked, Constants::BPS, *pool.total_collateral)
+            } else {
+                0
+            };
 
             SwapQuote {
                 base_rate_bps: oracle_rate,
-                imbalance_adjustment_bps: adjustment,
-                adjustment_is_positive: is_positive,
-                fee_spread_bps: *params.fee_spread_bps,
+                imbalance_adjustment_bps: demand_spread,
+                adjustment_is_positive: is_crowded,
+                fee_spread_bps: *params.base_fee_spread_bps + demand_spread,
                 final_rate_bps: final_rate,
                 required_collateral,
-                lp_collateral_to_lock: required_collateral,
+                lp_collateral_to_lock: max_exposure,
+                current_utilization_bps,
+                demand_spread_bps: demand_spread,
             }
         }
 
@@ -436,11 +377,12 @@ pub mod SwapManagerComponent {
         ) -> HealthStatus {
             // Calculate current PnL using SettlementEngine
             let twa = RateEngine::calculate_twa(market.rate_index, swap, current_time);
-            let current_pnl = if current_time >= *swap.expiration_time {
-                SettlementEngine::calculate_pnl(swap, twa)
+            let end_time = if current_time >= *swap.expiration_time {
+                *swap.expiration_time
             } else {
-                SettlementEngine::calculate_pnl_partial(swap, twa, current_time)
+                current_time
             };
+            let current_pnl = SettlementEngine::calculate_pnl(swap, twa, end_time);
 
             // Calculate remaining value
             let buyer_remaining = apply_pnl(*swap.buyer_collateral, current_pnl);
@@ -465,15 +407,11 @@ pub mod SwapManagerComponent {
                 buyer_remaining, adjusted_margin,
             );
 
-            // Check if liquidatable
-            let is_liquidatable = health_factor < *market.params.liquidation_threshold_bps;
-
             HealthStatus {
                 current_pnl,
                 buyer_remaining_value: buyer_remaining,
                 required_margin: adjusted_margin,
                 health_factor_bps: health_factor,
-                is_liquidatable,
                 time_to_expiry_seconds: remaining_time,
             }
         }

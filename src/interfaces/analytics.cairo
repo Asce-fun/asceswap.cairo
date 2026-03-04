@@ -1,7 +1,6 @@
 use starknet::ContractAddress;
 use crate::types::analytics::{
     DashboardPageData, LpPageData, MarketsPageData, SwapDetailData, SwapScenarioAnalysis,
-    UserLpPositions,
 };
 
 #[starknet::interface]
@@ -10,13 +9,7 @@ pub trait IAnalytics<TContractState> {
     // Page-Level Aggregation (Single call per page)
     // ============================================================
 
-    /// Get complete user dashboard with automatic ID discovery
-    /// Just pass the user address - fetches all swap IDs and LP positions automatically
-    /// This is the primary function for user dashboard
-    fn get_user_dashboard_full(self: @TContractState, user: ContractAddress) -> DashboardPageData;
-
-    /// Get all data needed for user dashboard page (with explicit IDs)
-    /// Use this if you already have the IDs from an indexer
+    /// Get all data needed for user dashboard page (with explicit IDs from indexer)
     fn get_dashboard_page(
         self: @TContractState,
         user: ContractAddress,
@@ -29,10 +22,6 @@ pub trait IAnalytics<TContractState> {
     fn get_lp_page(
         self: @TContractState, user: ContractAddress, market_pair_ids: Span<felt252>,
     ) -> LpPageData;
-
-    /// Get user's LP positions automatically (only markets where user has LP)
-    /// Just pass the user address - fetches LP pair IDs automatically
-    fn get_user_lp_positions(self: @TContractState, user: ContractAddress) -> UserLpPositions;
 
     /// Get all data needed for markets/trading page
     /// Shows all available markets for opening swaps
