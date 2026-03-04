@@ -1,3 +1,7 @@
+```
+PS: This is the latest version of AsceSwap with a better design. The current frontend depicts the previous version, which was just a prototype.
+```
+
 # AsceSwap
 
 On-chain interest rate swap protocol on StarkNet. Trade fixed vs floating rates against an LP pool. Positions are ERC721 NFTs, LP shares are ERC6909 with an ERC4626 vault interface.
