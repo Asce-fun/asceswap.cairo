@@ -4,7 +4,6 @@
 **Chain:** StarkNet
 **Language:** Cairo (edition 2024_07, Scarb, starknet v2.15.1)
 **Codebase:** 28 Cairo files, ~6,043 lines of code
-**Audit Date:** February 2026
 **Auditor:** Claude Code (Opus 4.6)
 
 ---
