@@ -70,11 +70,20 @@ pub mod RateEngine {
         let last_rate = *rate_index.last_rate_bps;
         let base_cumulative = *rate_index.cumulative_rate_time;
 
-        if target_time <= last_update {
+        if target_time == last_update {
             return base_cumulative;
         }
 
-        // Extrapolate from last update to target time
+        if target_time < last_update {
+            // Backward interpolation: subtract excess post-target accumulation
+            let excess: u256 = last_rate * (last_update - target_time).into();
+            if base_cumulative >= excess {
+                return base_cumulative - excess;
+            }
+            return 0;
+        }
+
+        // Forward extrapolation
         let time_delta: u256 = (target_time - last_update).into();
         base_cumulative + (last_rate * time_delta)
     }
@@ -91,6 +100,7 @@ pub mod RateEngine {
         let effective_end_time = min_u64(current_time, expiration_time);
 
         // Duration for TWA calculation
+        //@audit: I beleive this condition will never be reached
         if effective_end_time <= start_time {
             return *rate_index.last_rate_bps;
         }
@@ -201,10 +211,10 @@ pub mod RateEngine {
     pub fn calculate_swap_rate(
         pool: @LpPool, params: @MarketParams, side: SwapSide, oracle_rate: u256, notional: u256,
     ) -> (u256, u256, bool) {
-        // === Pass 1: Pre-trade spread ===
+        // Pre-trade spread 
         let spread_before = calculate_demand_spread(pool, params, side);
 
-        // === Pass 2: Simulate post-trade state ===
+        // Simulate post-trade state
         // Estimate LP collateral that would be locked using the pre-trade spread
         let tentative_rate = oracle_rate + spread_before + *params.base_fee_spread_bps;
         let tentative_exposure = calculate_payment(
@@ -259,15 +269,14 @@ mod tests {
     // Helper to create default MarketParams for testing
     fn default_market_params() -> MarketParams {
         MarketParams {
-            liquidation_threshold_bps: 8000,
             initial_margin_multiplier_bps: 12000,
             min_margin_floor_bps: 2000,
             min_swap_term_seconds: 86400, // 1 day
             max_swap_term_seconds: 2592000, // 30 days
             min_hold_period_seconds: 3600,
             swap_fee_bps: 50,
-            early_exit_fee_bps: 100,
-            liquidation_bonus_bps: 500,
+            max_early_exit_fee_bps: 300,
+            min_early_exit_fee_bps: 25,
             base_fee_spread_bps: 10, // 0.1% base LP edge
             demand_spread_factor: 10000, // 1x scaling (neutral)
             max_total_utilization_bps: 9000, // 90% combined cap
@@ -348,6 +357,20 @@ mod tests {
         // Target time before or at last update - return base cumulative
         let cumulative = RateEngine::calculate_cumulative_at(@rate_index, 1000);
         assert(cumulative == 50000, 'no time passed');
+    }
+
+    #[test]
+    fn test_calculate_cumulative_at_backward_interpolation() {
+        let rate_index = RateIndex {
+            last_update_time: 1100,
+            last_rate_bps: 500,
+            cumulative_rate_time: 100000,
+            last_valid_rate_bps: 500,
+        };
+        // excess = 500 * (1100 - 1050) = 25000
+        // result = 100000 - 25000 = 75000
+        let cumulative = RateEngine::calculate_cumulative_at(@rate_index, 1050);
+        assert(cumulative == 75000, 'backward interpolation');
     }
 
     #[test]

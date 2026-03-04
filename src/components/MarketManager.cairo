@@ -174,14 +174,6 @@ pub mod MarketManagerComponent {
         /// Validate market parameters
         fn _validate_market_params(self: @ComponentState<TContractState>, params: @MarketParams) {
             
-            // liquidation_threshold_bps
-            assert(
-                *params.liquidation_threshold_bps >= Constants::MIN_LIQUIDATION_THRESHOLD_BPS
-                    && *params
-                        .liquidation_threshold_bps <= Constants::MAX_LIQUIDATION_THRESHOLD_BPS,
-                Errors::INVALID_PARAMS,
-            );
-
             //initial_margin_multiplier_bps
             assert(
                 *params.initial_margin_multiplier_bps >= Constants::MIN_MARGIN_MULTIPLIER_BPS
@@ -219,11 +211,12 @@ pub mod MarketManagerComponent {
             //swap_fee_bps
             assert(*params.swap_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
 
-            //early_exit_fee_bps
-            assert(*params.early_exit_fee_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
-
-            //liquidation_bonus_bps
-            assert(*params.liquidation_bonus_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);
+            // Early exit fees: max >= min, both <= MAX_FEE_BPS
+            assert(
+                *params.max_early_exit_fee_bps >= *params.min_early_exit_fee_bps
+                    && *params.max_early_exit_fee_bps <= Constants::MAX_FEE_BPS,
+                Errors::INVALID_PARAMS,
+            );
 
             // base_fee_spread_bps — reasonable base spread
             assert(*params.base_fee_spread_bps <= Constants::MAX_FEE_BPS, Errors::INVALID_PARAMS);

@@ -1,5 +1,5 @@
 // Health Calculator Library
-// Pure functions for health factor calculation, liquidation eligibility, and margin adjustments
+// Pure functions for health factor calculation and margin adjustments
 
 pub mod HealthCal {
     use crate::helpers::constants::Constants;
@@ -35,29 +35,20 @@ pub mod HealthCal {
         // Calculate health factor
         let health_factor = calculate_health_factor(buyer_remaining, adjusted_margin);
 
-        // Check if liquidatable
-        let is_liquidatable = health_factor < *params.liquidation_threshold_bps;
-
         HealthStatus {
             current_pnl,
             buyer_remaining_value: buyer_remaining,
             required_margin: adjusted_margin,
             health_factor_bps: health_factor,
-            is_liquidatable,
             time_to_expiry_seconds: remaining_time,
         }
-    }
-
-    /// Check if position is liquidatable
-    pub fn is_liquidatable(health_factor_bps: u256, threshold_bps: u256) -> bool {
-        health_factor_bps < threshold_bps
     }
 
     pub fn calculate_health_factor(remaining_value: u256, required_margin: u256) -> u256 {
         if required_margin == 0 {
             return Constants::BPS; // 100% if no requirement
         }
-        // Round DOWN - health appears lower, triggers liquidation earlier (safer)
+        // Round DOWN - conservative health factor (safer for protocol)
         mul_div_down(remaining_value, Constants::BPS, required_margin)
     }
 
@@ -200,27 +191,6 @@ mod tests {
         assert(margin == 1000, 'zero term = full');
     }
 
-
-    #[test]
-    fn test_is_liquidatable_true() {
-        // Health 7000 (70%) < threshold 8000 (80%) = liquidatable
-        let result = HealthCal::is_liquidatable(7000, 8000);
-        assert(result == true, 'should be liquidatable');
-    }
-
-    #[test]
-    fn test_is_liquidatable_false() {
-        // Health 9000 (90%) > threshold 8000 (80%) = safe
-        let result = HealthCal::is_liquidatable(9000, 8000);
-        assert(result == false, 'should be safe');
-    }
-
-    #[test]
-    fn test_is_liquidatable_at_threshold() {
-        // Health 8000 = threshold 8000 = NOT liquidatable (must be strictly less)
-        let result = HealthCal::is_liquidatable(8000, 8000);
-        assert(result == false, 'at threshold safe');
-    }
 
     //calculate_required_margin tests
 

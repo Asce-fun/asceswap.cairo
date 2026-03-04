@@ -89,6 +89,8 @@ pub mod Asceswap {
         // External PositionManager contract (ERC721 NFTs)
         position_manager: IPositionManagerDispatcher,
         token_whitelisted: Map<ContractAddress, bool>,
+        // Two-step settle/claim: swap_id → payout + 1 (sentinel: 0 = not settled)
+        claim_amounts: Map<u256, u256>,
     }
 
     #[event]
@@ -118,6 +120,7 @@ pub mod Asceswap {
         ProtocolConfigUpdated: ProtocolConfigUpdated,
         TokenWhitelisted: TokenWhitelisted,
         TokenDeWhitelisted: TokenDeWhitelisted,
+        SwapClaimed: SwapClaimed,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -149,6 +152,14 @@ pub mod Asceswap {
         pub token: ContractAddress,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct SwapClaimed {
+        #[key]
+        pub swap_id: u256,
+        pub owner: ContractAddress,
+        pub amount: u256,
+        pub timestamp: u64,
+    }
 
     #[constructor]
     fn constructor(
@@ -421,33 +432,63 @@ pub mod Asceswap {
             self.reentrancy.start();
             self._assert_not_paused();
 
-            // Read swap once here
             let swap = self.swap_manager.get_swap(swap_id);
-            let pair_id = swap.pair_id; // extract before move
+            let pair_id = swap.pair_id;
             let mut market = self.market_manager._get_market(pair_id);
-            let position_manager = IERC721OwnerDispatcher{contract_address: self.position_manager.read().contract_address};
-            let owner = position_manager.owner_of(swap_id);
-            assert(owner == get_caller_address(), Errors::UNAUTHORIZED);
-            let current_time = get_block_timestamp();
 
-            // Update rate index
-            self.market_manager._update_rate_index(ref market, current_time);
-
-            //call settlement for swap
+            // Settle so TWA uses pre-update cumulative
             let (updated_pool, result) = self
                 .swap_manager
-                .settle_swap(swap_id, swap, owner, @market);
+                .settle_swap(swap_id, swap, @market);
 
-            // Burn NFT via PositionManager
-            self.position_manager.read().burn(swap_id);
+            // NOW update rate index (for other active swaps)
+            let current_time = get_block_timestamp();
+            self.market_manager._update_rate_index(ref market, current_time);
 
-            // Transfer payout
-            SafeERC20::safe_transfer(market.collateral_token, owner, result.buyer_payout);
+            // Store payout for claim (sentinel: stored = payout + 1, so 0 = "not settled")
+            self.claim_amounts.write(swap_id, result.buyer_payout + 1);
 
             // Update market state
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
             self.market_manager._write_market(pair_id, market);
+
+            self.reentrancy.end();
+        }
+
+        fn claim(ref self: ContractState, swap_id: u256) {
+            self.reentrancy.start();
+            self._assert_not_paused();
+
+            // Only NFT owner can claim
+            let position_manager = IERC721OwnerDispatcher {
+                contract_address: self.position_manager.read().contract_address,
+            };
+            let owner = position_manager.owner_of(swap_id);
+            assert(owner == get_caller_address(), Errors::UNAUTHORIZED);
+
+            // Read and validate claim
+            let stored = self.claim_amounts.read(swap_id);
+            assert(stored > 0, Errors::NOTHING_TO_CLAIM);
+
+            // CEI: clear claim before external calls
+            self.claim_amounts.write(swap_id, 0);
+            let payout = stored - 1; // Undo sentinel
+
+            // Burn NFT
+            self.position_manager.read().burn(swap_id);
+
+            // Transfer payout (safe_transfer skips if amount == 0)
+            let swap = self.swap_manager.get_swap(swap_id);
+            let market = self.market_manager._get_market(swap.pair_id);
+            SafeERC20::safe_transfer(market.collateral_token, owner, payout);
+
+            self.emit(SwapClaimed {
+                swap_id,
+                owner,
+                amount: payout,
+                timestamp: get_block_timestamp(),
+            });
 
             self.reentrancy.end();
         }
@@ -478,41 +519,6 @@ pub mod Asceswap {
 
             // Transfer payout
             SafeERC20::safe_transfer(market.collateral_token, owner, result.buyer_payout);
-
-            // Update market state
-            market.pool = updated_pool;
-            market.active_swap_count = market.active_swap_count - 1;
-            self.market_manager._write_market(pair_id, market);
-
-            self.reentrancy.end();
-        }
-
-        fn liquidate(ref self: ContractState, swap_id: u256) {
-            self.reentrancy.start();
-            self._assert_not_paused();
-
-            // Read swap once here (component won't read again)
-            let swap = self.swap_manager.get_swap(swap_id);
-            let pair_id = swap.pair_id; // extract before move
-            let mut market = self.market_manager._get_market(pair_id);
-            let liquidator = get_caller_address();
-            let position_manager = IERC721OwnerDispatcher{contract_address: self.position_manager.read().contract_address};
-            let owner = position_manager.owner_of(swap_id);
-            let current_time = get_block_timestamp();
-
-            // Update rate index
-            self.market_manager._update_rate_index(ref market, current_time);
-
-            // Liquidate via component (pass swap by value - saves 1 storage read)
-            let (updated_pool, result, _health_status) = self
-                .swap_manager
-                .liquidate(swap_id, swap, liquidator, owner, @market);
-
-            // Burn NFT via PositionManager
-            self.position_manager.read().burn(swap_id);
-
-            // Transfer liquidator bonus
-            SafeERC20::safe_transfer(market.collateral_token, liquidator, result.liquidator_bonus);
 
             // Update market state
             market.pool = updated_pool;

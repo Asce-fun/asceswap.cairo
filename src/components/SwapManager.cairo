@@ -18,6 +18,7 @@ pub mod SwapManagerComponent {
         SignedValue, Swap, SwapQuote, SwapSide, SwapStatus,
     };
 
+
     #[storage]
     pub struct Storage {
         swaps: Map<u256, Swap>,
@@ -30,7 +31,6 @@ pub mod SwapManagerComponent {
         SwapCreated: SwapCreated,
         SwapSettled: SwapSettled,
         SwapExitedEarly: SwapExitedEarly,
-        SwapLiquidated: SwapLiquidated,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -56,8 +56,6 @@ pub mod SwapManagerComponent {
         pub swap_id: u256,
         #[key]
         pub pair_id: felt252,
-        #[key]
-        pub owner: ContractAddress,
         pub twa_rate_bps: u256,
         pub pnl: SignedValue,
         pub buyer_payout: u256,
@@ -76,21 +74,6 @@ pub mod SwapManagerComponent {
         pub pnl: SignedValue,
         pub penalty: u256,
         pub buyer_payout: u256,
-        pub timestamp: u64,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct SwapLiquidated {
-        #[key]
-        pub swap_id: u256,
-        #[key]
-        pub pair_id: felt252,
-        #[key]
-        pub owner: ContractAddress,
-        pub liquidator: ContractAddress,
-        pub health_factor_bps: u256,
-        pub liquidator_bonus: u256,
-        pub remaining_to_pool: u256,
         pub timestamp: u64,
     }
 
@@ -244,7 +227,6 @@ pub mod SwapManagerComponent {
             ref self: ComponentState<TContractState>,
             swap_id: u256,
             swap: Swap,
-            owner: ContractAddress,
             market: @MarketPair,
         ) -> (LpPool, SettlementResult) {
             // is swap active
@@ -271,7 +253,6 @@ pub mod SwapManagerComponent {
                     SwapSettled {
                         swap_id,
                         pair_id: swap.pair_id,
-                        owner,
                         twa_rate_bps: result.twa_rate_bps,
                         pnl: result.pnl,
                         buyer_payout: result.buyer_payout,
@@ -332,59 +313,6 @@ pub mod SwapManagerComponent {
                 );
 
             (pool, result)
-        }
-
-        /// Liquidate an unhealthy swap
-        /// Returns (updated_pool, settlement_result, health_status)
-        /// Accepts swap by value to avoid redundant storage read
-        fn liquidate(
-            ref self: ComponentState<TContractState>,
-            swap_id: u256,
-            swap: Swap,
-            liquidator: ContractAddress,
-            owner: ContractAddress,
-            market: @MarketPair,
-        ) -> (LpPool, SettlementResult, HealthStatus) {
-            // Validate swap (no storage read needed)
-            assert(swap.status == SwapStatus::Active, Errors::SWAP_NOT_ACTIVE);
-
-            let current_time = get_block_timestamp();
-            assert(current_time < swap.expiration_time, Errors::SWAP_EXPIRED_USE_SETTLE);
-
-            // Check health (use snapshot)
-            let health_status = self.calculate_health_status(@swap, market, current_time);
-            assert(health_status.is_liquidatable, Errors::HEALTHY_POSITION);
-
-            // Process settlement using SettlementEngine (pass snapshot)
-            let result = SettlementEngine::process_settlement(
-                @swap, market.rate_index, market.params, SettlementType::Liquidation, current_time,
-            );
-
-            // Update pool (use snapshot)
-            let pool = SettlementEngine::finalize_pool_state(*market.pool, @swap, result.lp_delta);
-
-            let remaining_to_pool = result.lp_delta.value;
-
-            // Update swap status and write back
-            let mut swap = swap;
-            swap.status = SwapStatus::Liquidated;
-            self.swaps.write(swap_id, swap);
-
-            self
-                .emit(
-                    SwapLiquidated {
-                        swap_id,
-                        pair_id: swap.pair_id,
-                        owner,
-                        liquidator,
-                        health_factor_bps: health_status.health_factor_bps,
-                        liquidator_bonus: result.liquidator_bonus,
-                        remaining_to_pool,
-                        timestamp: current_time,
-                    },
-                );
-
-            (pool, result, health_status)
         }
 
         /// Get a swap
@@ -449,11 +377,12 @@ pub mod SwapManagerComponent {
         ) -> HealthStatus {
             // Calculate current PnL using SettlementEngine
             let twa = RateEngine::calculate_twa(market.rate_index, swap, current_time);
-            let current_pnl = if current_time >= *swap.expiration_time {
-                SettlementEngine::calculate_pnl(swap, twa)
+            let end_time = if current_time >= *swap.expiration_time {
+                *swap.expiration_time
             } else {
-                SettlementEngine::calculate_pnl_partial(swap, twa, current_time)
+                current_time
             };
+            let current_pnl = SettlementEngine::calculate_pnl(swap, twa, end_time);
 
             // Calculate remaining value
             let buyer_remaining = apply_pnl(*swap.buyer_collateral, current_pnl);
@@ -478,15 +407,11 @@ pub mod SwapManagerComponent {
                 buyer_remaining, adjusted_margin,
             );
 
-            // Check if liquidatable
-            let is_liquidatable = health_factor < *market.params.liquidation_threshold_bps;
-
             HealthStatus {
                 current_pnl,
                 buyer_remaining_value: buyer_remaining,
                 required_margin: adjusted_margin,
                 health_factor_bps: health_factor,
-                is_liquidatable,
                 time_to_expiry_seconds: remaining_time,
             }
         }
