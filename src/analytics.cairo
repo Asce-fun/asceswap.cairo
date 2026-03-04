@@ -10,9 +10,11 @@ pub mod Analytics {
     use core::num::traits::Zero;
     use starknet::ContractAddress;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::get_block_timestamp;
     use crate::interfaces::analytics::IAnalytics;
     use crate::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
     use crate::interfaces::erc6909::{IERC6909Dispatcher, IERC6909DispatcherTrait};
+    use crate::libraries::settlement_engine::SettlementEngine;
     use crate::types::analytics::{
         DashboardPageData, DetailedScenario, LpPageData, MarketForLp, MarketForTrading,
         MarketsPageData, SwapDetailData, SwapScenarioAnalysis,
@@ -60,7 +62,6 @@ pub mod Analytics {
             let mut fixed_positions: u32 = 0;
             let mut floating_positions: u32 = 0;
             let mut positions_at_risk: u32 = 0;
-            let mut has_liquidatable: bool = false;
             let mut expiring_soon_count: u32 = 0;
             let mut total_health: u256 = 0;
             let mut active_count: u32 = 0;
@@ -84,11 +85,6 @@ pub mod Analytics {
                     // Check health
                     if swap.health_factor_bps < AT_RISK_THRESHOLD_BPS {
                         positions_at_risk += 1;
-                    }
-
-                    // Check if liquidatable (health < 100%)
-                    if swap.health_factor_bps < 10000 {
-                        has_liquidatable = true;
                     }
 
                     // Check expiring soon
@@ -134,7 +130,6 @@ pub mod Analytics {
                 total_lp_share_percentage_bps,
                 swap_positions: swap_summaries,
                 lp_positions: lp_summaries,
-                has_liquidatable_positions: has_liquidatable,
                 has_expiring_soon: expiring_soon_count > 0,
                 expiring_soon_count,
             }
@@ -290,7 +285,8 @@ pub mod Analytics {
                     max_swap_term_seconds: market.params.max_swap_term_seconds,
                     min_notional_per_swap: market.params.min_notional_per_swap,
                     swap_fee_bps: market.params.swap_fee_bps,
-                    early_exit_fee_bps: market.params.early_exit_fee_bps,
+                    max_early_exit_fee_bps: market.params.max_early_exit_fee_bps,
+                    min_early_exit_fee_bps: market.params.min_early_exit_fee_bps,
                 };
 
                 markets.append(market_for_trading);
@@ -323,8 +319,13 @@ pub mod Analytics {
             // For now, we'll use a zero address placeholder - the main contract should expose this
             let owner: ContractAddress = Zero::zero();
 
-            // Calculate early exit info
-            let early_exit_fee = (swap.buyer_collateral * market.params.early_exit_fee_bps) / 10000;
+            // Calculate early exit info with time-decaying fee
+            let current_time = get_block_timestamp();
+            let fee_bps = SettlementEngine::calculate_early_exit_fee_bps(
+                swap.start_time, swap.expiration_time, current_time,
+                market.params.max_early_exit_fee_bps, market.params.min_early_exit_fee_bps,
+            );
+            let early_exit_fee = (swap.buyer_collateral * fee_bps) / 10000;
             let early_exit_payout = if swap_analytics.current_pnl.is_negative {
                 let loss = if swap_analytics.current_pnl.value > swap.buyer_collateral {
                     swap.buyer_collateral
@@ -365,7 +366,6 @@ pub mod Analytics {
                 breakeven_rate_bps: breakeven_rate,
                 health_factor_bps: health_status.health_factor_bps,
                 required_margin: health_status.required_margin,
-                is_liquidatable: health_status.is_liquidatable,
                 start_time: swap.start_time,
                 expiration_time: swap.expiration_time,
                 elapsed_seconds: swap_analytics.elapsed_seconds,

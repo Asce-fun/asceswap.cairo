@@ -28,7 +28,6 @@ pub struct DashboardPageData {
     pub swap_positions: Span<UserSwapSummary>,
     pub lp_positions: Span<UserLpSummary>,
     // Alerts
-    pub has_liquidatable_positions: bool,
     pub has_expiring_soon: bool, // Within 24h
     pub expiring_soon_count: u32,
 }
@@ -104,7 +103,8 @@ pub struct MarketForTrading {
     pub min_notional_per_swap: u256,
     // Fee info
     pub swap_fee_bps: u256,
-    pub early_exit_fee_bps: u256,
+    pub max_early_exit_fee_bps: u256,
+    pub min_early_exit_fee_bps: u256,
 }
 
 /// Complete data for markets/trading page
@@ -141,7 +141,6 @@ pub struct SwapDetailData {
     // Health
     pub health_factor_bps: u256,
     pub required_margin: u256,
-    pub is_liquidatable: bool,
     // Time
     pub start_time: u64,
     pub expiration_time: u64,

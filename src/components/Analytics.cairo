@@ -135,7 +135,6 @@ pub mod AnalyticsComponent {
                 notional: swap.notional,
                 collateral: swap.buyer_collateral,
                 health_factor_bps: health.health_factor_bps,
-                is_liquidatable: health.is_liquidatable,
                 elapsed_seconds,
                 remaining_seconds,
                 progress_bps,
