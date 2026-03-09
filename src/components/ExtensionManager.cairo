@@ -5,9 +5,9 @@ pub mod ExtensionManagerComponent {
     use starknet::{ContractAddress, get_caller_address};
     use crate::helpers::errors::Errors;
     use crate::interfaces::extension::{IExtensionDispatcher, IExtensionDispatcherTrait};
-    use crate::types::asce_swap::{SettlementType, SettlementResult};
+    use crate::types::asce_swap::{SettlementResult, SettlementType};
     use crate::types::extension::{
-        CallPoints, MarketCreationParams, SwapOpenParams, LiquidityParams,
+        CallPoints, LiquidityParams, MarketCreationParams, SwapOpenParams,
     };
 
     #[storage]
@@ -34,9 +34,7 @@ pub mod ExtensionManagerComponent {
         TContractState, +HasComponent<TContractState>, +Drop<TContractState>,
     > of InternalTrait<TContractState> {
         /// Register caller's call points (one-time only)
-        fn set_call_points(
-            ref self: ComponentState<TContractState>, call_points: CallPoints,
-        ) {
+        fn set_call_points(ref self: ComponentState<TContractState>, call_points: CallPoints) {
             let caller = get_caller_address();
             assert(!self.extension_registered.read(caller), Errors::EXTENSION_NOT_REGISTERED);
 
@@ -79,7 +77,6 @@ pub mod ExtensionManagerComponent {
             self.extension_call_points.read(extension)
         }
 
-        // ======== Dispatch functions ========
 
         fn _dispatch_before_market_creation(
             self: @ComponentState<TContractState>,
@@ -165,9 +162,7 @@ pub mod ExtensionManagerComponent {
             let cp = self._get_call_points(extension, caller);
             if cp.after_swap_close {
                 IExtensionDispatcher { contract_address: extension }
-                    .after_swap_close(
-                        caller, pair_id, swap_id, settlement_type, settlement_result,
-                    );
+                    .after_swap_close(caller, pair_id, swap_id, settlement_type, settlement_result);
             }
         }
 

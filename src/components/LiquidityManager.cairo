@@ -68,9 +68,8 @@ pub mod LiquidityManagerComponent {
             mut pool: LpPool,
             collateral_token: ContractAddress,
         ) -> (u256, LpPool) {
-          
             let mut erc6909 = get_dep_component_mut!(ref self, ERC6909Comp);
-            
+
             let id: u256 = pair_id.into();
 
             // ERC4626: shares = previewDeposit(assets) — rounds DOWN

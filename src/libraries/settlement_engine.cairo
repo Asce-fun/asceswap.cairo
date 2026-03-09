@@ -64,8 +64,11 @@ pub mod SettlementEngine {
 
     /// Linear decay: max_fee at term start -> min_fee at expiry
     pub fn calculate_early_exit_fee_bps(
-        start_time: u64, expiration_time: u64, current_time: u64,
-        max_fee_bps: u256, min_fee_bps: u256,
+        start_time: u64,
+        expiration_time: u64,
+        current_time: u64,
+        max_fee_bps: u256,
+        min_fee_bps: u256,
     ) -> u256 {
         let total_term: u256 = (expiration_time - start_time).into();
         let elapsed: u256 = (current_time - start_time).into();
@@ -98,8 +101,11 @@ pub mod SettlementEngine {
             SettlementType::Normal => { (base_pnl, 0_u256) },
             SettlementType::EarlyExit => {
                 let fee_bps = calculate_early_exit_fee_bps(
-                    *swap.start_time, *swap.expiration_time, current_time,
-                    *params.max_early_exit_fee_bps, *params.min_early_exit_fee_bps,
+                    *swap.start_time,
+                    *swap.expiration_time,
+                    current_time,
+                    *params.max_early_exit_fee_bps,
+                    *params.min_early_exit_fee_bps,
                 );
                 let penalty = Utils::calculate_fee(*swap.initial_required_margin, fee_bps);
                 let adjusted = apply_early_exit_penalty(base_pnl, penalty);
@@ -110,13 +116,7 @@ pub mod SettlementEngine {
         // Calculate payouts
         let (buyer_payout, lp_delta) = calculate_settlement_payouts(swap, adjusted_pnl);
 
-        SettlementResult {
-            buyer_payout,
-            lp_delta,
-            penalty,
-            twa_rate_bps: twa_rate,
-            pnl: base_pnl,
-        }
+        SettlementResult { buyer_payout, lp_delta, penalty, twa_rate_bps: twa_rate, pnl: base_pnl }
     }
 
     /// Update pool state after settlement (unlock collateral, apply delta, decrement count)

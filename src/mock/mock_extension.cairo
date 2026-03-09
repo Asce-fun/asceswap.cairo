@@ -17,17 +17,17 @@ pub trait IMockExtension<TContractState> {
 
 #[starknet::contract]
 pub mod MockExtension {
+    use starknet::ContractAddress;
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::ContractAddress;
-    use crate::interfaces::extension::IExtension;
     use crate::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
+    use crate::interfaces::extension::IExtension;
+    use crate::types::asce_swap::{SettlementResult, SettlementType};
     use crate::types::extension::{
-        CallPoints, MarketCreationParams, SwapOpenParams, LiquidityParams,
+        CallPoints, LiquidityParams, MarketCreationParams, SwapOpenParams,
     };
-    use crate::types::asce_swap::{SettlementType, SettlementResult};
 
     #[storage]
     struct Storage {
@@ -99,14 +99,10 @@ pub mod MockExtension {
     #[abi(embed_v0)]
     impl ExtensionImpl of IExtension<ContractState> {
         fn before_market_creation(
-            ref self: ContractState,
-            caller: ContractAddress,
-            creation_params: MarketCreationParams,
+            ref self: ContractState, caller: ContractAddress, creation_params: MarketCreationParams,
         ) {
             assert(!self.should_revert.read('before_market_creation'), 'MOCK_REVERT');
-            self
-                .before_market_creation_count
-                .write(self.before_market_creation_count.read() + 1);
+            self.before_market_creation_count.write(self.before_market_creation_count.read() + 1);
         }
 
         fn after_market_creation(
@@ -117,9 +113,7 @@ pub mod MockExtension {
             shares_minted: u256,
         ) {
             assert(!self.should_revert.read('after_market_creation'), 'MOCK_REVERT');
-            self
-                .after_market_creation_count
-                .write(self.after_market_creation_count.read() + 1);
+            self.after_market_creation_count.write(self.after_market_creation_count.read() + 1);
             self.last_pair_id.write(pair_id);
         }
 
@@ -195,9 +189,7 @@ pub mod MockExtension {
             params: LiquidityParams,
         ) {
             assert(!self.should_revert.read('before_remove_liquidity'), 'MOCK_REVERT');
-            self
-                .before_remove_liquidity_count
-                .write(self.before_remove_liquidity_count.read() + 1);
+            self.before_remove_liquidity_count.write(self.before_remove_liquidity_count.read() + 1);
         }
 
         fn after_remove_liquidity(
@@ -207,9 +199,7 @@ pub mod MockExtension {
             params: LiquidityParams,
         ) {
             assert(!self.should_revert.read('after_remove_liquidity'), 'MOCK_REVERT');
-            self
-                .after_remove_liquidity_count
-                .write(self.after_remove_liquidity_count.read() + 1);
+            self.after_remove_liquidity_count.write(self.after_remove_liquidity_count.read() + 1);
         }
     }
 }

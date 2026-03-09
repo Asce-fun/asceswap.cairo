@@ -1,13 +1,11 @@
 use starknet::ContractAddress;
-use crate::types::extension::{MarketCreationParams, SwapOpenParams, LiquidityParams};
-use crate::types::asce_swap::{SettlementType, SettlementResult};
+use crate::types::asce_swap::{SettlementResult, SettlementType};
+use crate::types::extension::{LiquidityParams, MarketCreationParams, SwapOpenParams};
 
 #[starknet::interface]
 pub trait IExtension<TContractState> {
     fn before_market_creation(
-        ref self: TContractState,
-        caller: ContractAddress,
-        creation_params: MarketCreationParams,
+        ref self: TContractState, caller: ContractAddress, creation_params: MarketCreationParams,
     );
 
     fn after_market_creation(
@@ -19,10 +17,7 @@ pub trait IExtension<TContractState> {
     );
 
     fn before_swap_open(
-        ref self: TContractState,
-        caller: ContractAddress,
-        pair_id: felt252,
-        params: SwapOpenParams,
+        ref self: TContractState, caller: ContractAddress, pair_id: felt252, params: SwapOpenParams,
     );
 
     fn after_swap_open(

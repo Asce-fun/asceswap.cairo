@@ -173,7 +173,7 @@ pub struct PoolAnalytics {
 pub enum SettlementType {
     #[default]
     Normal, // settle_swap at expiration
-    EarlyExit, // early_exit with penalty
+    EarlyExit // early_exit with penalty
 }
 
 /// Result of a settlement operation

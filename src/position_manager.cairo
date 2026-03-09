@@ -51,16 +51,12 @@ pub mod PositionManager {
 
     #[constructor]
     fn constructor(
-        ref self: ContractState,
-        access_registry: ContractAddress,
-        asceswap: ContractAddress,
+        ref self: ContractState, access_registry: ContractAddress, asceswap: ContractAddress,
     ) {
         assert(!access_registry.is_zero(), Errors::ZERO_ADDRESS);
         self.erc721.initializer("AsceSwap Position", "ASCEWAP", "");
         self.asceswap_address.write(asceswap);
-        self
-            .access_control
-            .write(IAccessControlDispatcher { contract_address: access_registry });
+        self.access_control.write(IAccessControlDispatcher { contract_address: access_registry });
     }
 
     #[abi(embed_v0)]

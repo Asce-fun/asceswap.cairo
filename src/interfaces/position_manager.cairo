@@ -21,4 +21,3 @@ pub trait IERC721Owner<TContractState> {
     fn owner_of(self: @TContractState, token_id: u256) -> ContractAddress;
 }
 
-

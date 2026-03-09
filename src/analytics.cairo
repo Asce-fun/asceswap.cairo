@@ -8,9 +8,8 @@
 #[starknet::contract]
 pub mod Analytics {
     use core::num::traits::Zero;
-    use starknet::ContractAddress;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::get_block_timestamp;
+    use starknet::{ContractAddress, get_block_timestamp};
     use crate::interfaces::analytics::IAnalytics;
     use crate::interfaces::asce_swap::{IAsceSwapDispatcher, IAsceSwapDispatcherTrait};
     use crate::interfaces::erc6909::{IERC6909Dispatcher, IERC6909DispatcherTrait};
@@ -322,8 +321,11 @@ pub mod Analytics {
             // Calculate early exit info with time-decaying fee
             let current_time = get_block_timestamp();
             let fee_bps = SettlementEngine::calculate_early_exit_fee_bps(
-                swap.start_time, swap.expiration_time, current_time,
-                market.params.max_early_exit_fee_bps, market.params.min_early_exit_fee_bps,
+                swap.start_time,
+                swap.expiration_time,
+                current_time,
+                market.params.max_early_exit_fee_bps,
+                market.params.min_early_exit_fee_bps,
             );
             let early_exit_fee = (swap.buyer_collateral * fee_bps) / 10000;
             let early_exit_payout = if swap_analytics.current_pnl.is_negative {
