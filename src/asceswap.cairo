@@ -12,6 +12,7 @@ pub mod Asceswap {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use crate::components::Analytics::AnalyticsComponent;
     use crate::components::ERC6909::ERC6909Component;
+    use crate::components::ExtensionManager::ExtensionManagerComponent;
     use crate::components::LiquidityManager::LiquidityManagerComponent;
     use crate::components::MarketManager::MarketManagerComponent;
     use crate::components::Security::SecurityComponent;
@@ -21,12 +22,16 @@ pub mod Asceswap {
     use crate::helpers::safe_erc20::SafeERC20;
     use crate::interfaces::asce_swap::IAsceSwap;
     use crate::interfaces::position_manager::{
-        IPositionManagerDispatcher, IPositionManagerDispatcherTrait,IERC721OwnerDispatcher, IERC721OwnerDispatcherTrait,
+        IERC721OwnerDispatcher, IERC721OwnerDispatcherTrait, IPositionManagerDispatcher,
+        IPositionManagerDispatcherTrait,
     };
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPool, MarketPair, MarketParams, MarketStatus, PoolAnalytics,
-        ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard,
-        UserLpSummary, UserSwapSummary,
+        ProtocolConfig, ScenarioResult, SettlementType, Swap, SwapAnalytics, SwapQuote, SwapSide,
+        UserDashboard, UserLpSummary, UserSwapSummary,
+    };
+    use crate::types::extension::{
+        CallPoints, LiquidityParams, MarketCreationParams, SwapOpenParams,
     };
 
     // Component declarations
@@ -42,6 +47,9 @@ pub mod Asceswap {
     );
     component!(path: SwapManagerComponent, storage: swap_manager, event: SwapManagerEvent);
     component!(path: AnalyticsComponent, storage: analytics, event: AnalyticsEvent);
+    component!(
+        path: ExtensionManagerComponent, storage: extension_manager, event: ExtensionManagerEvent,
+    );
 
     // Embeddable implementations
     #[abi(embed_v0)]
@@ -57,6 +65,7 @@ pub mod Asceswap {
     impl LiquidityManagerInternalImpl = LiquidityManagerComponent::InternalImpl<ContractState>;
     impl SwapManagerInternalImpl = SwapManagerComponent::InternalImpl<ContractState>;
     impl AnalyticsInternalImpl = AnalyticsComponent::InternalImpl<ContractState>;
+    impl ExtensionManagerInternalImpl = ExtensionManagerComponent::InternalImpl<ContractState>;
 
     #[storage]
     pub struct Storage {
@@ -82,6 +91,8 @@ pub mod Asceswap {
         swap_manager: SwapManagerComponent::Storage,
         #[substorage(v0)]
         analytics: AnalyticsComponent::Storage,
+        #[substorage(v0)]
+        extension_manager: ExtensionManagerComponent::Storage,
         // Protocol-level storage (stays in main contract)
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
@@ -115,6 +126,8 @@ pub mod Asceswap {
         #[flat]
         SwapManagerEvent: SwapManagerComponent::Event,
         AnalyticsEvent: AnalyticsComponent::Event,
+        #[flat]
+        ExtensionManagerEvent: ExtensionManagerComponent::Event,
         FlagSet: FlagSet,
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
         ProtocolConfigUpdated: ProtocolConfigUpdated,
@@ -206,6 +219,7 @@ pub mod Asceswap {
             curator: ContractAddress,
             params: MarketParams,
             initial_liquidity_amount: u256,
+            extension: ContractAddress,
         ) -> (felt252, u256) {
             // Reentrancy guard
             self.reentrancy.start();
@@ -219,9 +233,33 @@ pub mod Asceswap {
             assert(self.token_whitelisted.read(collateral_token), Errors::TOKEN_NOT_WHITELISTED);
             assert(!curator.is_zero(), Errors::ZERO_ADDRESS);
 
+            // Validate extension is registered (if non-zero)
+            if !extension.is_zero() {
+                assert(
+                    self.extension_manager.is_extension_registered(extension),
+                    Errors::EXTENSION_NOT_REGISTERED,
+                );
+            }
+
+            let caller = get_caller_address();
+
+            // Build creation params for hook dispatch
+            let creation_params = MarketCreationParams {
+                rate_oracle,
+                collateral_token,
+                curator,
+                params,
+                initial_liquidity: initial_liquidity_amount,
+            };
+
+            // Dispatch before_market_creation hook
+            self
+                .extension_manager
+                ._dispatch_before_market_creation(extension, caller, creation_params);
+
             let pair_id = self
                 .market_manager
-                ._create_market_pair(rate_oracle, collateral_token, curator, params);
+                ._create_market_pair(rate_oracle, collateral_token, curator, params, extension);
 
             // Handle LP permissioning
             if params.is_lp_permissioned {
@@ -232,8 +270,6 @@ pub mod Asceswap {
             self._deduct_market_creation_fees();
 
             // Supply initial liquidity
-            let caller = get_caller_address();
-
             let pool = LpPool {
                 total_collateral: 0, locked_for_fixed: 0, locked_for_floating: 0, total_shares: 0,
             };
@@ -248,6 +284,13 @@ pub mod Asceswap {
             let mut updated_market = self.market_manager._get_market(pair_id);
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after_market_creation hook
+            self
+                .extension_manager
+                ._dispatch_after_market_creation(
+                    extension, caller, pair_id, creation_params, shares,
+                );
 
             self.reentrancy.end();
             (pair_id, shares)
@@ -276,6 +319,13 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before add liquidity hook
+            let preview_shares = self.liquidity_manager._preview_deposit(assets, @market.pool);
+            let before_params = LiquidityParams { assets, shares: preview_shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_add_liquidity(market.extension, caller, pair_id, before_params);
+
             let (shares, updated_pool) = self
                 .liquidity_manager
                 ._deposit(pair_id, assets, caller, receiver, market.pool, market.collateral_token);
@@ -284,6 +334,12 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after add liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_add_liquidity(market.extension, caller, pair_id, after_params);
 
             self.reentrancy.end();
             shares
@@ -302,6 +358,13 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before add liquidity hook
+            let preview_assets = self.liquidity_manager._preview_mint(shares, @market.pool);
+            let before_params = LiquidityParams { assets: preview_assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_add_liquidity(market.extension, caller, pair_id, before_params);
+
             let (assets, updated_pool) = self
                 .liquidity_manager
                 ._mint(pair_id, shares, caller, receiver, market.pool, market.collateral_token);
@@ -310,6 +373,12 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after add liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_add_liquidity(market.extension, caller, pair_id, after_params);
 
             self.reentrancy.end();
             assets
@@ -326,6 +395,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before remove liquidity hook
+            let preview_assets = self.liquidity_manager._preview_redeem(shares, @market.pool);
+            let before_params = LiquidityParams { assets: preview_assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_remove_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (assets, updated_pool) = self
                 .liquidity_manager
                 ._redeem(pair_id, shares, caller, receiver, market.pool, market.collateral_token);
@@ -334,6 +412,12 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after remove liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_remove_liquidity(market.extension, caller, pair_id, after_params);
 
             self.reentrancy.end();
             assets
@@ -350,6 +434,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before remove liquidity hook
+            let preview_shares = self.liquidity_manager._preview_withdraw(assets, @market.pool);
+            let before_params = LiquidityParams { assets, shares: preview_shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_remove_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (shares, updated_pool) = self
                 .liquidity_manager
                 ._withdraw(pair_id, assets, caller, receiver, market.pool, market.collateral_token);
@@ -358,6 +451,12 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after remove liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_remove_liquidity(market.extension, caller, pair_id, after_params);
 
             self.reentrancy.end();
             shares
@@ -385,6 +484,14 @@ pub mod Asceswap {
 
             // Update rate index (event emitted inside MarketManager)
             let oracle_rate = self.market_manager._update_rate_index(ref market, current_time);
+
+            // Build swap open params and dispatch before hook
+            let swap_open_params = SwapOpenParams {
+                side, notional, collateral, max_rate_bps, swap_term, receiver,
+            };
+            self
+                .extension_manager
+                ._dispatch_before_swap_open(market.extension, caller, pair_id, swap_open_params);
 
             let config = self.protocol_config.read();
 
@@ -424,6 +531,13 @@ pub mod Asceswap {
             market.active_swap_count = market.active_swap_count + 1;
             self.market_manager._write_market(pair_id, market);
 
+            // Dispatch after swap open hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_open(
+                    market.extension, caller, pair_id, swap_open_params, swap_id,
+                );
+
             self.reentrancy.end();
             swap_id
         }
@@ -435,11 +549,17 @@ pub mod Asceswap {
             let swap = self.swap_manager.get_swap(swap_id);
             let pair_id = swap.pair_id;
             let mut market = self.market_manager._get_market(pair_id);
+            let caller = get_caller_address();
+
+            // Dispatch before swap close hook
+            self
+                .extension_manager
+                ._dispatch_before_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::Normal,
+                );
 
             // Settle so TWA uses pre-update cumulative
-            let (updated_pool, result) = self
-                .swap_manager
-                .settle_swap(swap_id, swap, @market);
+            let (updated_pool, result) = self.swap_manager.settle_swap(swap_id, swap, @market);
 
             // NOW update rate index (for other active swaps)
             let current_time = get_block_timestamp();
@@ -452,6 +572,13 @@ pub mod Asceswap {
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
             self.market_manager._write_market(pair_id, market);
+
+            // Dispatch after swap close hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::Normal, result,
+                );
 
             self.reentrancy.end();
         }
@@ -483,12 +610,12 @@ pub mod Asceswap {
             let market = self.market_manager._get_market(swap.pair_id);
             SafeERC20::safe_transfer(market.collateral_token, owner, payout);
 
-            self.emit(SwapClaimed {
-                swap_id,
-                owner,
-                amount: payout,
-                timestamp: get_block_timestamp(),
-            });
+            self
+                .emit(
+                    SwapClaimed {
+                        swap_id, owner, amount: payout, timestamp: get_block_timestamp(),
+                    },
+                );
 
             self.reentrancy.end();
         }
@@ -502,12 +629,21 @@ pub mod Asceswap {
             let pair_id = swap.pair_id; // extract before move
             let mut market = self.market_manager._get_market(pair_id);
             let caller = get_caller_address();
-            let position_manager = IERC721OwnerDispatcher{contract_address: self.position_manager.read().contract_address};
+            let position_manager = IERC721OwnerDispatcher {
+                contract_address: self.position_manager.read().contract_address,
+            };
             let owner = position_manager.owner_of(swap_id);
             let current_time = get_block_timestamp();
 
             // Update rate index
             self.market_manager._update_rate_index(ref market, current_time);
+
+            // Dispatch before swap close hook
+            self
+                .extension_manager
+                ._dispatch_before_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::EarlyExit,
+                );
 
             // Early exit via component (pass swap by value - saves 1 storage read)
             let (updated_pool, result) = self
@@ -525,6 +661,13 @@ pub mod Asceswap {
             market.active_swap_count = market.active_swap_count - 1;
             self.market_manager._write_market(pair_id, market);
 
+            // Dispatch after swap close hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::EarlyExit, result,
+                );
+
             self.reentrancy.end();
         }
 
@@ -537,11 +680,7 @@ pub mod Asceswap {
         }
 
         fn get_swap_quote(
-            self: @ContractState,
-            pair_id: felt252,
-            side: SwapSide,
-            notional: u256,
-            swap_term: u64,
+            self: @ContractState, pair_id: felt252, side: SwapSide, notional: u256, swap_term: u64,
         ) -> SwapQuote {
             let market = self.market_manager._get_market(pair_id);
             let (oracle_rate, _) = self.market_manager._get_oracle_rate(market.rate_oracle);
@@ -677,6 +816,36 @@ pub mod Asceswap {
 
         fn get_breakeven_rate(self: @ContractState, swap_id: u256) -> u256 {
             self.analytics._get_breakeven_rate(swap_id)
+        }
+
+        fn set_call_points(ref self: ContractState, call_points: CallPoints) {
+            self.reentrancy.start();
+            self.extension_manager.set_call_points(call_points);
+            self.reentrancy.end();
+        }
+
+        fn withdraw_to_extension(ref self: ContractState, pair_id: felt252, amount: u256) {
+            self.reentrancy.start();
+            let caller = get_caller_address();
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
+
+            SafeERC20::safe_transfer(market.collateral_token, caller, amount);
+
+            self.reentrancy.end();
+        }
+
+        fn receive_from_extension(ref self: ContractState, pair_id: felt252, amount: u256) {
+            self.reentrancy.start();
+            let caller = get_caller_address();
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
+
+            SafeERC20::strict_transfer_from(
+                market.collateral_token, caller, get_contract_address(), amount,
+            );
+
+            self.reentrancy.end();
         }
 
         fn poke_rate_index(ref self: ContractState, pair_id: felt252) {

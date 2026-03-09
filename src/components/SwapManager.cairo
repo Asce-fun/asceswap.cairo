@@ -106,7 +106,6 @@ pub mod SwapManagerComponent {
             oracle_rate: u256,
             protocol_fee_share_bps: u256,
         ) -> (u256, LpPool, u256, u256) {
-
             assert(notional >= *market.params.min_notional_per_swap, Errors::BELOW_MIN_NOTIONAL);
 
             assert(
@@ -134,9 +133,8 @@ pub mod SwapManagerComponent {
             let lp_collateral_needed = max_exposure;
 
             // Calculate fees on max_exposure (deterministic per position)
-            let (net_collateral, lp_fee_portion, protocol_portion) = match *market
-                .params
-                .swap_fee_bps {
+            let (net_collateral, lp_fee_portion, protocol_portion) =
+                match *market.params.swap_fee_bps {
                 0 => { (collateral, 0, 0) },
                 _ => {
                     let swap_fee = Utils::calculate_fee(max_exposure, *market.params.swap_fee_bps);
@@ -200,7 +198,6 @@ pub mod SwapManagerComponent {
 
             pool.total_collateral = pool.total_collateral + lp_fee_portion;
 
-
             self
                 .emit(
                     SwapCreated {
@@ -235,7 +232,7 @@ pub mod SwapManagerComponent {
             let current_time = get_block_timestamp();
             assert(current_time >= swap.expiration_time, Errors::SWAP_NOT_EXPIRED);
 
-            // Process settlement using SettlementEngine 
+            // Process settlement using SettlementEngine
             let result = SettlementEngine::process_settlement(
                 @swap, market.rate_index, market.params, SettlementType::Normal, current_time,
             );

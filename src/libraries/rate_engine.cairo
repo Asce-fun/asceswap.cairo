@@ -96,7 +96,8 @@ pub mod RateEngine {
         let expiration_time = *swap.expiration_time;
 
         // Cap at expiration - never include post-expiration rates
-        //@audit - why do we need the min_u64 here? shouldn't effective_end_time = expiration_time always?
+        //@audit - why do we need the min_u64 here? shouldn't effective_end_time = expiration_time
+        //always?
         let effective_end_time = min_u64(current_time, expiration_time);
 
         // Duration for TWA calculation
@@ -211,7 +212,7 @@ pub mod RateEngine {
     pub fn calculate_swap_rate(
         pool: @LpPool, params: @MarketParams, side: SwapSide, oracle_rate: u256, notional: u256,
     ) -> (u256, u256, bool) {
-        // Pre-trade spread 
+        // Pre-trade spread
         let spread_before = calculate_demand_spread(pool, params, side);
 
         // Simulate post-trade state

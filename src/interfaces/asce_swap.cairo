@@ -4,6 +4,7 @@ use crate::types::asce_swap::{
     ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard, UserLpSummary,
     UserSwapSummary,
 };
+use crate::types::extension::CallPoints;
 
 #[starknet::interface]
 pub trait IAsceSwap<TContractState> {
@@ -15,6 +16,7 @@ pub trait IAsceSwap<TContractState> {
         curator: ContractAddress,
         params: MarketParams,
         initial_liquidity_amount: u256,
+        extension: ContractAddress,
     ) -> (felt252, u256);
 
     /// Pause a market
@@ -175,6 +177,10 @@ pub trait IAsceSwap<TContractState> {
     fn get_user_lp_summary(
         self: @TContractState, user: ContractAddress, pair_ids: Span<felt252>,
     ) -> Span<UserLpSummary>;
+
+    fn set_call_points(ref self: TContractState, call_points: CallPoints);
+    fn withdraw_to_extension(ref self: TContractState, pair_id: felt252, amount: u256);
+    fn receive_from_extension(ref self: TContractState, pair_id: felt252, amount: u256);
 
     fn poke_rate_index(ref self: TContractState, pair_id: felt252);
 

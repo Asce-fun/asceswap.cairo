@@ -96,6 +96,7 @@ pub struct MarketPair {
     // Counters
     pub total_swaps_created: u256,
     pub active_swap_count: u256,
+    pub extension: ContractAddress,
 }
 
 
@@ -172,7 +173,7 @@ pub struct PoolAnalytics {
 pub enum SettlementType {
     #[default]
     Normal, // settle_swap at expiration
-    EarlyExit, // early_exit with penalty
+    EarlyExit // early_exit with penalty
 }
 
 /// Result of a settlement operation
