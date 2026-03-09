@@ -30,7 +30,7 @@ pub mod Asceswap {
         UserDashboard, UserLpSummary, UserSwapSummary,
     };
     use crate::types::asce_swap::SettlementType;
-    use crate::types::extension::{CallPoints, MarketCreationParams, SwapOpenParams};
+    use crate::types::extension::{CallPoints, LiquidityParams, MarketCreationParams, SwapOpenParams};
 
     // Component declarations
     component!(path: ERC6909Component, storage: erc6909, event: ERC6909Event);
@@ -319,6 +319,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before add liquidity hook
+            let preview_shares = self.liquidity_manager._preview_deposit(assets, @market.pool);
+            let before_params = LiquidityParams { assets, shares: preview_shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_add_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (shares, updated_pool) = self
                 .liquidity_manager
                 ._deposit(pair_id, assets, caller, receiver, market.pool, market.collateral_token);
@@ -327,6 +336,14 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after add liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_add_liquidity(
+                    market.extension, caller, pair_id, after_params,
+                );
 
             self.reentrancy.end();
             shares
@@ -345,6 +362,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before add liquidity hook
+            let preview_assets = self.liquidity_manager._preview_mint(shares, @market.pool);
+            let before_params = LiquidityParams { assets: preview_assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_add_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (assets, updated_pool) = self
                 .liquidity_manager
                 ._mint(pair_id, shares, caller, receiver, market.pool, market.collateral_token);
@@ -353,6 +379,14 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after add liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_add_liquidity(
+                    market.extension, caller, pair_id, after_params,
+                );
 
             self.reentrancy.end();
             assets
@@ -369,6 +403,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before remove liquidity hook
+            let preview_assets = self.liquidity_manager._preview_redeem(shares, @market.pool);
+            let before_params = LiquidityParams { assets: preview_assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_remove_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (assets, updated_pool) = self
                 .liquidity_manager
                 ._redeem(pair_id, shares, caller, receiver, market.pool, market.collateral_token);
@@ -377,6 +420,14 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after remove liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_remove_liquidity(
+                    market.extension, caller, pair_id, after_params,
+                );
 
             self.reentrancy.end();
             assets
@@ -393,6 +444,15 @@ pub mod Asceswap {
 
             let caller = get_caller_address();
 
+            // Dispatch before remove liquidity hook
+            let preview_shares = self.liquidity_manager._preview_withdraw(assets, @market.pool);
+            let before_params = LiquidityParams { assets, shares: preview_shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_before_remove_liquidity(
+                    market.extension, caller, pair_id, before_params,
+                );
+
             let (shares, updated_pool) = self
                 .liquidity_manager
                 ._withdraw(pair_id, assets, caller, receiver, market.pool, market.collateral_token);
@@ -401,6 +461,14 @@ pub mod Asceswap {
             let mut updated_market = market;
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after remove liquidity hook
+            let after_params = LiquidityParams { assets, shares, receiver };
+            self
+                .extension_manager
+                ._dispatch_after_remove_liquidity(
+                    market.extension, caller, pair_id, after_params,
+                );
 
             self.reentrancy.end();
             shares
