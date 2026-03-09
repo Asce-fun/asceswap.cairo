@@ -29,4 +29,6 @@ pub mod Errors {
     pub const EXCEEDS_TOTAL_UTILIZATION: felt252 = 'Exceeds total utilization';
     pub const INVALID_SWAP_TERM: felt252 = 'Swap term out of bounds';
     pub const NOTHING_TO_CLAIM: felt252 = 'Nothing to claim';
+    pub const EXTENSION_NOT_REGISTERED: felt252 = 'Extension not registered';
+    pub const NOT_MARKET_EXTENSION: felt252 = 'Not market extension';
 }

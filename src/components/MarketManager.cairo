@@ -78,6 +78,7 @@ pub mod MarketManagerComponent {
             collateral_token: ContractAddress,
             curator: ContractAddress,
             params: MarketParams,
+            extension: ContractAddress,
         ) -> felt252 {
             self._validate_market_params(@params);
 
@@ -121,6 +122,7 @@ pub mod MarketManagerComponent {
                 },
                 total_swaps_created: 0,
                 active_swap_count: 0,
+                extension,
             };
 
             self.markets.write(pair_id, market);

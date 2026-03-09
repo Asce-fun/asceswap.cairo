@@ -12,6 +12,7 @@ pub mod Asceswap {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use crate::components::Analytics::AnalyticsComponent;
     use crate::components::ERC6909::ERC6909Component;
+    use crate::components::ExtensionManager::ExtensionManagerComponent;
     use crate::components::LiquidityManager::LiquidityManagerComponent;
     use crate::components::MarketManager::MarketManagerComponent;
     use crate::components::Security::SecurityComponent;
@@ -25,9 +26,10 @@ pub mod Asceswap {
     };
     use crate::types::asce_swap::{
         HealthStatus, LpAnalytics, LpPool, MarketPair, MarketParams, MarketStatus, PoolAnalytics,
-        ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide, UserDashboard,
-        UserLpSummary, UserSwapSummary,
+        ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
+        UserDashboard, UserLpSummary, UserSwapSummary,
     };
+    use crate::types::extension::{CallPoints, MarketCreationParams};
 
     // Component declarations
     component!(path: ERC6909Component, storage: erc6909, event: ERC6909Event);
@@ -42,6 +44,11 @@ pub mod Asceswap {
     );
     component!(path: SwapManagerComponent, storage: swap_manager, event: SwapManagerEvent);
     component!(path: AnalyticsComponent, storage: analytics, event: AnalyticsEvent);
+    component!(
+        path: ExtensionManagerComponent,
+        storage: extension_manager,
+        event: ExtensionManagerEvent,
+    );
 
     // Embeddable implementations
     #[abi(embed_v0)]
@@ -57,6 +64,7 @@ pub mod Asceswap {
     impl LiquidityManagerInternalImpl = LiquidityManagerComponent::InternalImpl<ContractState>;
     impl SwapManagerInternalImpl = SwapManagerComponent::InternalImpl<ContractState>;
     impl AnalyticsInternalImpl = AnalyticsComponent::InternalImpl<ContractState>;
+    impl ExtensionManagerInternalImpl = ExtensionManagerComponent::InternalImpl<ContractState>;
 
     #[storage]
     pub struct Storage {
@@ -82,6 +90,8 @@ pub mod Asceswap {
         swap_manager: SwapManagerComponent::Storage,
         #[substorage(v0)]
         analytics: AnalyticsComponent::Storage,
+        #[substorage(v0)]
+        extension_manager: ExtensionManagerComponent::Storage,
         // Protocol-level storage (stays in main contract)
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
@@ -115,6 +125,8 @@ pub mod Asceswap {
         #[flat]
         SwapManagerEvent: SwapManagerComponent::Event,
         AnalyticsEvent: AnalyticsComponent::Event,
+        #[flat]
+        ExtensionManagerEvent: ExtensionManagerComponent::Event,
         FlagSet: FlagSet,
         ProtocolFeesWithdrawn: ProtocolFeesWithdrawn,
         ProtocolConfigUpdated: ProtocolConfigUpdated,
@@ -206,6 +218,7 @@ pub mod Asceswap {
             curator: ContractAddress,
             params: MarketParams,
             initial_liquidity_amount: u256,
+            extension: ContractAddress,
         ) -> (felt252, u256) {
             // Reentrancy guard
             self.reentrancy.start();
@@ -219,9 +232,33 @@ pub mod Asceswap {
             assert(self.token_whitelisted.read(collateral_token), Errors::TOKEN_NOT_WHITELISTED);
             assert(!curator.is_zero(), Errors::ZERO_ADDRESS);
 
+            // Validate extension is registered (if non-zero)
+            if !extension.is_zero() {
+                assert(
+                    self.extension_manager.is_extension_registered(extension),
+                    Errors::EXTENSION_NOT_REGISTERED,
+                );
+            }
+
+            let caller = get_caller_address();
+
+            // Build creation params for hook dispatch
+            let creation_params = MarketCreationParams {
+                rate_oracle,
+                collateral_token,
+                curator,
+                params,
+                initial_liquidity: initial_liquidity_amount,
+            };
+
+            // Dispatch before_market_creation hook
+            self
+                .extension_manager
+                ._dispatch_before_market_creation(extension, caller, creation_params);
+
             let pair_id = self
                 .market_manager
-                ._create_market_pair(rate_oracle, collateral_token, curator, params);
+                ._create_market_pair(rate_oracle, collateral_token, curator, params, extension);
 
             // Handle LP permissioning
             if params.is_lp_permissioned {
@@ -232,8 +269,6 @@ pub mod Asceswap {
             self._deduct_market_creation_fees();
 
             // Supply initial liquidity
-            let caller = get_caller_address();
-
             let pool = LpPool {
                 total_collateral: 0, locked_for_fixed: 0, locked_for_floating: 0, total_shares: 0,
             };
@@ -248,6 +283,13 @@ pub mod Asceswap {
             let mut updated_market = self.market_manager._get_market(pair_id);
             updated_market.pool = updated_pool;
             self.market_manager._write_market(pair_id, updated_market);
+
+            // Dispatch after_market_creation hook
+            self
+                .extension_manager
+                ._dispatch_after_market_creation(
+                    extension, caller, pair_id, creation_params, shares,
+                );
 
             self.reentrancy.end();
             (pair_id, shares)
@@ -677,6 +719,36 @@ pub mod Asceswap {
 
         fn get_breakeven_rate(self: @ContractState, swap_id: u256) -> u256 {
             self.analytics._get_breakeven_rate(swap_id)
+        }
+
+        fn set_call_points(ref self: ContractState, call_points: CallPoints) {
+            self.reentrancy.start();
+            self.extension_manager.set_call_points(call_points);
+            self.reentrancy.end();
+        }
+
+        fn withdraw_to_extension(ref self: ContractState, pair_id: felt252, amount: u256) {
+            self.reentrancy.start();
+            let caller = get_caller_address();
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
+
+            SafeERC20::safe_transfer(market.collateral_token, caller, amount);
+
+            self.reentrancy.end();
+        }
+
+        fn receive_from_extension(ref self: ContractState, pair_id: felt252, amount: u256) {
+            self.reentrancy.start();
+            let caller = get_caller_address();
+            let market = self.market_manager._get_market(pair_id);
+            assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
+
+            SafeERC20::strict_transfer_from(
+                market.collateral_token, caller, get_contract_address(), amount,
+            );
+
+            self.reentrancy.end();
         }
 
         fn poke_rate_index(ref self: ContractState, pair_id: felt252) {
