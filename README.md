@@ -1,45 +1,41 @@
-```
-PS: This is the latest version of AsceSwap with a better design. The current frontend depicts the previous version, which was just a prototype.
-```
-
 # AsceSwap
 
-On-chain interest rate swap protocol on StarkNet. Trade fixed vs floating rates against an LP pool. Positions are ERC721 NFTs, LP shares are ERC6909 with an ERC4626 vault interface.
+The interest rate swap infrastructure layer for StarkNet. AsceSwap lets traders hedge or speculate on any on-chain interest rate, LPs earn yield by providing liquidity, and builders create new rate products using a permissionless hook system.
+
+Swap positions are ERC721 NFTs. LP shares are ERC6909 tokens with an ERC4626 vault interface. Any rate oracle can be plugged in — DeFi lending rates, staking yields, LP fee rates, or custom feeds.
 
 ## Architecture
 
 ```
-                    ┌──────────────────────┐
-                    │   Analytics Contract  │  Single-call page data
-                    └──────────┬───────────┘
-                               │ dispatcher calls
-                    ┌──────────▼───────────┐
-                    │   AsceSwap (Main)     │  Core protocol
-                    │                      │
-                    │  ┌────────────────┐  │
-                    │  │ MarketManager  │  │  Market creation & params
-                    │  │ SwapManager    │  │  Swap lifecycle & settlement
-                    │  │ LiquidityMgr   │  │  LP deposits & withdrawals
-                    │  │ Security       │  │  Roles, pause, reentrancy
-                    │  │ Analytics      │  │  Dashboard & position data
-                    │  │ ERC6909        │  │  LP share token
-                    │  └────────────────┘  │
-                    │                      │
-                    │  ┌────────────────┐  │
-                    │  │ Libraries      │  │
-                    │  │  RateEngine    │  │  TWA, pricing, demand curve
-                    │  │  Settlement    │  │  PnL, payouts, exit fees
-                    │  │  HealthCalc    │  │  Margins, health factor
-                    │  │  PoolAcctg     │  │  Share math, locking
-                    │  └────────────────┘  │
-                    └──────────┬───────────┘
-                               │
-             ┌─────────────────┼──────────────────┐
-             │                 │                  │
-     ┌───────▼──────┐ ┌───────▼──────┐ ┌─────────▼────────┐
-     │ PositionMgr  │ │ Rate Oracle  │ │ AccessRegistry    │
-     │ ERC721 NFTs  │ │ External     │ │ Role management   │
-     └──────────────┘ └──────────────┘ └──────────────────┘
+  ┌────────────────┐
+  │   Extensions   │  Permissionless hook contracts
+  │  (builders)    │  Yield vaults, fixed-rate lending, gating, points...
+  └───────┬────────┘
+          │ hooks (before/after)
+          │ withdraw_to_extension / receive_from_extension
+          │
+┌─────────▼──────────────────────────────────────────┐
+│                  AsceSwap (Core)                    │
+│                                                    │
+│  ┌──────────────┐  ┌──────────────┐               │
+│  │ MarketManager│  │ ExtensionMgr │  Registration  │
+│  │ SwapManager  │  │              │  Re-entry skip │
+│  │ LiquidityMgr │  │              │  10 dispatchers│
+│  │ Security     │  └──────────────┘               │
+│  │ Analytics    │                                  │
+│  │ ERC6909      │  ┌──────────────┐               │
+│  └──────────────┘  │ Libraries    │               │
+│                    │  RateEngine  │               │
+│                    │  Settlement  │               │
+│                    │  HealthCalc  │               │
+│                    │  PoolAcctg   │               │
+│                    └──────────────┘               │
+└───────────┬────────────┬──────────────┬───────────┘
+            │            │              │
+    ┌───────▼──────┐ ┌───▼────────┐ ┌──▼───────────┐
+    │ PositionMgr  │ │ Rate Oracle│ │ AccessRegistry│
+    │ ERC721 NFTs  │ │ External   │ │ Roles         │
+    └──────────────┘ └────────────┘ └──────────────┘
 ```
 
 ## Core Concepts
@@ -160,6 +156,46 @@ LPs earn swap entry fees. LPs risk losing collateral when swap buyers profit.
 
 A `max_total_utilization_bps` cap prevents the pool from being fully locked.
 
+## Hook / Extension System
+
+External contracts can inject custom logic at every point in the protocol lifecycle. Extensions are **permissionless** — anyone can deploy one and create markets that use it. All hooks are **void** (no return values). Extensions validate (revert to block) or observe (write to own state).
+
+### How It Works
+
+1. Extension deploys and calls `core.set_call_points(flags)` once during construction
+2. Market creator passes the extension address when creating a market
+3. Core checks flags before each hook — zero gas overhead for unused hooks
+4. Extension calling back into core from within a hook auto-skips all hooks (re-entry safety)
+
+### Hook Points
+
+| Hook Pair | When It Fires | Use Cases |
+|-----------|--------------|-----------|
+| `before/after_market_creation` | Market is created | Validate params, enforce maturity, initialize state |
+| `before/after_swap_open` | Swap is opened (after rate update) | Whitelist, notional caps, deploy collateral to yield |
+| `before/after_swap_close` | Settlement or early exit | Recall deployed funds, award points, clean up state |
+| `before/after_add_liquidity` | LP deposit or mint | Gate deposits, deploy new capital to yield protocols |
+| `before/after_remove_liquidity` | LP redeem or withdraw | Recall funds from yield, enforce lockups |
+
+### Fund Access
+
+Extensions can move collateral in and out of core via two functions (not hooks):
+
+- `withdraw_to_extension(pair_id, amount)` — pull funds from core to deploy externally
+- `receive_from_extension(pair_id, amount)` — return funds to core
+
+Only the market's registered extension can call these. Market A's extension cannot touch Market B's funds.
+
+### What Builders Can Create
+
+- **Yield vaults** — deploy idle LP capital to lending protocols, auto-compound returns
+- **Fixed-rate lending** — wrap variable borrows + IRS hedge into a fixed-rate product
+- **LP tranching** — senior/junior tranches with different risk/return profiles
+- **Access control** — KYC gates, whitelists, per-user notional caps
+- **Points & rewards** — loyalty programs based on trading activity and PnL
+- **Auto-rolling swaps** — perpetual rate exposure without manual roll
+- **Custom market rules** — fixed maturity, term restrictions, oracle whitelists
+
 ## Market Parameters
 
 | Parameter | Description |
@@ -192,6 +228,7 @@ src/
 │   ├── MarketManager.cairo     # Market creation, params, oracle
 │   ├── SwapManager.cairo       # Swap buy, settle, early exit, claim
 │   ├── LiquidityManager.cairo  # ERC4626 vault (deposit/withdraw)
+│   ├── ExtensionManager.cairo  # Hook registration & dispatch
 │   ├── Analytics.cairo         # Dashboard & position analytics
 │   ├── ERC6909.cairo           # Multi-token LP shares
 │   └── Security.cairo          # Pause, reentrancy, roles
@@ -202,17 +239,25 @@ src/
 │   ├── health_calculator.cairo # Margin & health factor
 │   └── pool_accounting.cairo   # Share math, locking
 │
-├── interfaces/                 # All trait definitions
-├── types/                      # Structs, enums, type definitions
+├── interfaces/
+│   ├── asce_swap.cairo         # Core protocol interface
+│   ├── extension.cairo         # IExtension (10 hooks)
+│   └── ...                     # ERC20, ERC6909, oracle, etc.
+│
+├── types/
+│   ├── asce_swap.cairo         # MarketPair, Swap, SettlementResult, etc.
+│   ├── extension.cairo         # CallPoints, MarketCreationParams, SwapOpenParams, LiquidityParams
+│   └── analytics.cairo         # Analytics display types
+│
 ├── helpers/                    # Constants, errors, fixed-point math, utils
-└── mock/                       # Test mocks (oracle, token)
+└── mock/                       # Test mocks (oracle, token, extension)
 ```
 
 ## Build & Test
 
 ```bash
 scarb build        # Compile contracts
-snforge test       # Run test suite (110 tests)
+snforge test       # Run test suite
 scarb fmt          # Format code
 ```
 
