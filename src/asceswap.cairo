@@ -29,6 +29,7 @@ pub mod Asceswap {
         ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
         UserDashboard, UserLpSummary, UserSwapSummary,
     };
+    use crate::types::asce_swap::SettlementType;
     use crate::types::extension::{CallPoints, MarketCreationParams, SwapOpenParams};
 
     // Component declarations
@@ -492,6 +493,14 @@ pub mod Asceswap {
             let swap = self.swap_manager.get_swap(swap_id);
             let pair_id = swap.pair_id;
             let mut market = self.market_manager._get_market(pair_id);
+            let caller = get_caller_address();
+
+            // Dispatch before swap close hook
+            self
+                .extension_manager
+                ._dispatch_before_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::Normal,
+                );
 
             // Settle so TWA uses pre-update cumulative
             let (updated_pool, result) = self
@@ -509,6 +518,13 @@ pub mod Asceswap {
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
             self.market_manager._write_market(pair_id, market);
+
+            // Dispatch after swap close hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::Normal, result,
+                );
 
             self.reentrancy.end();
         }
@@ -566,6 +582,13 @@ pub mod Asceswap {
             // Update rate index
             self.market_manager._update_rate_index(ref market, current_time);
 
+            // Dispatch before swap close hook
+            self
+                .extension_manager
+                ._dispatch_before_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::EarlyExit,
+                );
+
             // Early exit via component (pass swap by value - saves 1 storage read)
             let (updated_pool, result) = self
                 .swap_manager
@@ -581,6 +604,13 @@ pub mod Asceswap {
             market.pool = updated_pool;
             market.active_swap_count = market.active_swap_count - 1;
             self.market_manager._write_market(pair_id, market);
+
+            // Dispatch after swap close hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_close(
+                    market.extension, caller, pair_id, swap_id, SettlementType::EarlyExit, result,
+                );
 
             self.reentrancy.end();
         }
