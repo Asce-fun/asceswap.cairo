@@ -96,6 +96,7 @@ pub struct MarketPair {
     // Counters
     pub total_swaps_created: u256,
     pub active_swap_count: u256,
+    pub extension: ContractAddress,
 }
 
 
