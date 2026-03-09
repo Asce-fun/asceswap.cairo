@@ -29,7 +29,7 @@ pub mod Asceswap {
         ProtocolConfig, ScenarioResult, Swap, SwapAnalytics, SwapQuote, SwapSide,
         UserDashboard, UserLpSummary, UserSwapSummary,
     };
-    use crate::types::extension::{CallPoints, MarketCreationParams};
+    use crate::types::extension::{CallPoints, MarketCreationParams, SwapOpenParams};
 
     // Component declarations
     component!(path: ERC6909Component, storage: erc6909, event: ERC6909Event);
@@ -428,6 +428,14 @@ pub mod Asceswap {
             // Update rate index (event emitted inside MarketManager)
             let oracle_rate = self.market_manager._update_rate_index(ref market, current_time);
 
+            // Build swap open params and dispatch before hook
+            let swap_open_params = SwapOpenParams {
+                side, notional, collateral, max_rate_bps, swap_term, receiver,
+            };
+            self
+                .extension_manager
+                ._dispatch_before_swap_open(market.extension, caller, pair_id, swap_open_params);
+
             let config = self.protocol_config.read();
 
             // Execute swap via component
@@ -465,6 +473,13 @@ pub mod Asceswap {
             market.total_swaps_created = market.total_swaps_created + 1;
             market.active_swap_count = market.active_swap_count + 1;
             self.market_manager._write_market(pair_id, market);
+
+            // Dispatch after swap open hook
+            self
+                .extension_manager
+                ._dispatch_after_swap_open(
+                    market.extension, caller, pair_id, swap_open_params, swap_id,
+                );
 
             self.reentrancy.end();
             swap_id
