@@ -8,7 +8,10 @@ pub mod PositionManager {
     use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_upgrades::UpgradeableComponent;
     use openzeppelin_upgrades::UpgradeableComponent::InternalTrait as UpgradeableInternalTrait;
-    use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
     use starknet::{ClassHash, ContractAddress, get_caller_address};
     use crate::helpers::errors::Errors;
     use crate::helpers::roles::Roles;
@@ -32,6 +35,7 @@ pub mod PositionManager {
         upgradeable: UpgradeableComponent::Storage,
         asceswap_address: ContractAddress,
         access_control: IAccessControlDispatcher,
+        token_uris: Map<u256, ByteArray>,
     }
 
     #[event]
@@ -78,6 +82,20 @@ pub mod PositionManager {
 
         fn get_asceswap(self: @ContractState) -> ContractAddress {
             self.asceswap_address.read()
+        }
+
+        fn set_token_uri(ref self: ContractState, token_id: u256, uri: ByteArray) {
+            // Only asceswap contract or admin can set URI
+            let caller = get_caller_address();
+            let is_asceswap = caller == self.asceswap_address.read();
+            let is_admin = self.access_control.read().has_role(Roles::ADMIN_ROLE, caller);
+            assert(is_asceswap || is_admin, Errors::UNAUTHORIZED);
+
+            self.token_uris.write(token_id, uri);
+        }
+
+        fn get_token_uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.token_uris.read(token_id)
         }
     }
 
