@@ -31,4 +31,5 @@ pub mod Errors {
     pub const NOTHING_TO_CLAIM: felt252 = 'Nothing to claim';
     pub const EXTENSION_NOT_REGISTERED: felt252 = 'Extension not registered';
     pub const NOT_MARKET_EXTENSION: felt252 = 'Not market extension';
+    pub const EXTENSION_OVERDRAW: felt252 = 'Extension overdraw';
 }

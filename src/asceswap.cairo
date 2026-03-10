@@ -97,6 +97,8 @@ pub mod Asceswap {
         protocol_config: ProtocolConfig,
         permissioned_flag: bool,
         protocol_fees: Map<ContractAddress, u256>,
+        // Extension fund tracking: pair_id → amount withdrawn by extension (net)
+        extension_withdrawn: Map<felt252, u256>,
         // External PositionManager contract (ERC721 NFTs)
         position_manager: IPositionManagerDispatcher,
         token_whitelisted: Map<ContractAddress, bool>,
@@ -830,6 +832,14 @@ pub mod Asceswap {
             let market = self.market_manager._get_market(pair_id);
             assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
 
+            // Market isolation: extension can only withdraw up to this market's total collateral
+            let already_withdrawn = self.extension_withdrawn.read(pair_id);
+            assert(
+                already_withdrawn + amount <= market.pool.total_collateral,
+                Errors::EXTENSION_OVERDRAW,
+            );
+            self.extension_withdrawn.write(pair_id, already_withdrawn + amount);
+
             SafeERC20::safe_transfer(market.collateral_token, caller, amount);
 
             self.reentrancy.end();
@@ -840,6 +850,14 @@ pub mod Asceswap {
             let caller = get_caller_address();
             let market = self.market_manager._get_market(pair_id);
             assert(market.extension == caller, Errors::NOT_MARKET_EXTENSION);
+
+            // Decrement the outstanding withdrawn amount for this market
+            let already_withdrawn = self.extension_withdrawn.read(pair_id);
+            if amount <= already_withdrawn {
+                self.extension_withdrawn.write(pair_id, already_withdrawn - amount);
+            } else {
+                self.extension_withdrawn.write(pair_id, 0);
+            }
 
             SafeERC20::strict_transfer_from(
                 market.collateral_token, caller, get_contract_address(), amount,
